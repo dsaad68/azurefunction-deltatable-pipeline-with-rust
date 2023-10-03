@@ -1,0 +1,13 @@
+{
+  "bindings": [
+    {
+      "name": "myBlob",
+      "type": "blobTrigger",
+      "direction": "in",
+      "path": "samples-workitems/{name}",
+      "connection": "ds0learning0adls_STORAGE",
+      "source": "EventGrid",
+      "dataType": "stream"
+    }
+  ]
+}
