@@ -52,14 +52,17 @@ struct BlobEvent {
     content_length: i64,
     blob_type: String,
     blob_url: String,
+    blob_size_mb: f64,
     url: String,
     event_time: NaiveDateTime
+    
 }
 
 
 impl From<Root> for BlobEvent {
     fn from(root: Root) -> Self {
         let event_data = root.data.event_grid_event.data;
+        let blob_size_mb = event_data.content_length as f64 / 1_048_576f64 ;
         let event_time = DateTime::parse_from_rfc3339(root.data.event_grid_event.event_time.as_str())
         .unwrap()
         .with_timezone(&Berlin)
@@ -71,6 +74,7 @@ impl From<Root> for BlobEvent {
             content_length: event_data.content_length,
             blob_type: event_data.blob_type,
             blob_url: event_data.blob_url,
+            blob_size_mb,
             url: event_data.url,
             event_time
         }
