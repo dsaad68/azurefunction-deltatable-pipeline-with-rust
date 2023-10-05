@@ -6,8 +6,9 @@ https://31c0-46-223-163-49.ngrok.io/runtime/webhooks/blobs?functionName=Host.Fun
 https://{functionappname}.azurewebsites.net/runtime/webhooks/eventgrid?functionName={functionname}
 
 
-https://95b3-46-223-163-49.ngrok.io/runtime/webhooks/eventgrid?functionName=Host.Functions.BlobTriggerEventGrid
+https://ae55-46-223-163-49.ngrok.io/runtime/webhooks/eventgrid?functionName=BlobTriggerEventGrid
 
 
 
 
+https://warm-severely-boxer.ngrok-free.app/runtime/webhooks/eventgrid?functionName=BlobTriggerEventGrid

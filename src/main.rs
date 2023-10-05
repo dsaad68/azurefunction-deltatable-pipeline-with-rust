@@ -94,19 +94,16 @@ async fn handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
     };
 
     // Check if the Body is Empty
-    // Azure function code 204
     if body_bytes.is_empty() {
         return Ok(Response::builder()
-            .status(StatusCode::BAD_REQUEST)
+            .status(StatusCode::NO_CONTENT)
             .header(header::CONTENT_TYPE, "application/json")
-            .body(Body::from("{ 'body' : 'Request body is empty'}"))
+            .body(Body::from("{ 'body' : 'No Content Success Status Response Code!'}"))
             .unwrap());
     }
 
     // Parse the JSON request.
     let json_request: Result<Value, serde_json::Error> = serde_json::from_slice(&body_bytes);
-
-    //println!("{:?}", json_request);
 
     match json_request {
         Ok(json_request) => {
@@ -120,7 +117,7 @@ async fn handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
             let response = Response::builder()
                 .status(StatusCode::OK)
                 .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from("{ 'body' :'Request body printed'}"))
+                .body(Body::from("{ 'body' :'Request body printed!'}"))
                 .unwrap();
             Ok(response)
         }
