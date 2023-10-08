@@ -3,14 +3,21 @@ mod helpers;
 use std::env;
 use std::convert::Infallible;
 
+use object_store::azure::MicrosoftAzureBuilder;
+
 use serde_json::{Value, json};
 
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{header, Body, Error, Request, Response, Server, StatusCode};
 
 use helpers::blob_event::{BlobEvent,Root};
+use helpers::blob_path::BlobPath;
 
 async fn handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
+
+    let azure_store = MicrosoftAzureBuilder::from_env()
+    .with_container_name("samples-workitems")
+    .build();
 
     println!("Rust HTTP trigger function begun");
 
@@ -46,6 +53,10 @@ async fn handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
             // Convert the Root instance to a BlobEvent instance
             let blob_event = BlobEvent::from(deserialized_data);
             println!("{:?}", blob_event);
+
+            // create a blob_path object
+            let blob_path = BlobPath::from_blob_url(& blob_event.blob_url);
+            println!("{:?}", blob_path);
 
             let response = Response::builder()
                 .status(StatusCode::OK)

@@ -13,3 +13,5 @@ serde_json = { version = "1.0.107" }
 chrono = { version = "0.4.31", features = ["serde"]  }
 chrono-tz = "0.8.3"
 deltalake = { version="0.16.0", features = ["azure"]  }
+object_store = {version = "0.7.1", features = ["azure"] }
+url = "2.4.1"

@@ -332,9 +332,11 @@ dependencies = [
  "chrono-tz",
  "deltalake",
  "hyper",
+ "object_store",
  "serde",
  "serde_json",
  "tokio",
+ "url",
 ]
 
 [[package]]
