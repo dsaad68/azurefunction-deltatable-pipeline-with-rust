@@ -12,6 +12,11 @@ serde = { version = "1.0.188", features = ["derive"] }
 serde_json = { version = "1.0.107" }
 chrono = { version = "0.4.31", features = ["serde"]  }
 chrono-tz = "0.8.3"
-deltalake = { version="0.16.0", features = ["azure"]  }
+deltalake = { version="0.16.0", features = ["azure", "parquet"]  }
 object_store = {version = "0.7.1", features = ["azure"] }
 url = "2.4.1"
+futures ="0.3.28"
+arrow = {version = "47.0.0", features = ["csv"]}
+log = "0.4.20"
+bytes = "1.5.0"
+parquet ="47.0.0"

@@ -29,8 +29,8 @@ impl BlobPath {
         } else {
             format!("/{}", path)
         };
+
         let complete_path = format!("{}/{}", path, file_name);
-        
         let abfss_uri = Self::generate_abfss_uri(&container_name, &account_name, &path, &file_name);
 
         Ok(BlobPath{
@@ -47,7 +47,7 @@ impl BlobPath {
 
     fn generate_abfss_uri(container_name: &String, account_name: &String, path: &String, file_name: &String) -> String {
         format!(
-            "abfss://{}@{}.dfs.core.windows.net/{}/{}",
+            "abfss://{}@{}.dfs.core.windows.net/{}{}",
             container_name,
             account_name,
             path,
