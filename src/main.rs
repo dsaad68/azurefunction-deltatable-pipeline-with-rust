@@ -1,58 +1,33 @@
 mod helpers;
 
+//use url::Url;
+
 use std::env;
 use std::sync::Arc;
 use std::convert::Infallible;
 
-use object_store::path::Path;
-use object_store::ObjectStore;
-use object_store::azure::MicrosoftAzureBuilder;
-
-#[allow(unused_imports)]
-use futures::executor::block_on;
-
-//use arrow::csv::ReaderBuilder;
-//use arrow::datatypes::{DataType as ArrowDataType, Field as ArrowField, Schema as ArrowSchema};
-
-#[allow(unused_imports)]
-use bytes::Bytes;
 use bytes::Buf;
 
-#[allow(unused_imports)]
-use serde::de;
 use serde_json::{Value, json};
 
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{header, Body, Error, Request, Response, Server, StatusCode};
 
-use helpers::blob_path::BlobPath;
-use helpers::blob_event::{BlobEvent,Root};
-
 use deltalake::arrow::csv::ReaderBuilder;
-use deltalake::operations::writer::{DeltaWriter,WriterConfig};
+//use deltalake::storage::DeltaObjectStore;
+use deltalake::operations::writer::{DeltaWriter, WriterConfig};
 use deltalake::arrow::datatypes::{DataType as ArrowDataType, Field as ArrowField, Schema as ArrowSchema};
-
-use deltalake::storage::DeltaObjectStore;
-
-use url::Url;
-
-
-#[allow(unused_imports)]
 use deltalake::parquet::{
     basic::{Compression, Encoding},
     file::properties::*,
-    schema::types::ColumnPath,
 };
 
+use helpers::blob_path::BlobPath;
+use helpers::blob_event::{BlobEvent,Root};
+use helpers::azure_storage::{get_azure_store, fetch_file};
+use helpers::delta_ops::get_delta_store;
 
 async fn handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
-
-    let azure_store = MicrosoftAzureBuilder::from_env()
-    .with_container_name("samples-workitems")
-    .build()
-    .unwrap();
-
-    let azure_store: Arc<dyn ObjectStore> = Arc::new(azure_store);
 
     println!("Rust HTTP trigger function begun");
 
@@ -93,11 +68,11 @@ async fn handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
             let blob_path = BlobPath::from_blob_url(& blob_event.blob_url).unwrap();
             println!("{:?}", & blob_path);
 
-            // Retrieve a specific file
-            let path: Path = blob_path.complete_path.try_into().unwrap();
-            println!("{:?}",path);
+            // create an azure store object
+            let azure_store = get_azure_store("samples-workitems");
 
-            let fetched = azure_store.get(& path).await.unwrap().bytes().await.unwrap();
+            // fetch the file from azure storage
+            let fetched = fetch_file(azure_store.clone(), blob_path).await;
 
             let schema = ArrowSchema::new(vec![
                 ArrowField::new("VendorID", ArrowDataType::Int32, false),
@@ -116,7 +91,6 @@ async fn handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
 
             let record_batch = csv.next().unwrap().unwrap();
             
-            
             // Use properties builder to set certain options and assemble the configuration.
             let writer_prop: Option<WriterProperties> = WriterProperties::builder()
                 .set_writer_version(WriterVersion::PARQUET_2_0)
@@ -127,11 +101,9 @@ async fn handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
                 .unwrap();
             
             let output_path = "https://ds0learning0adls.blob.core.windows.net/samples-workitems/vendors/";
-            let output_url = Url::parse(output_path).map_err(|e| format!("Failed to parse URL: {}", e)).unwrap();
+            let delta_store = get_delta_store("samples-workitems", output_path);
 
             let partition_columns = vec!["VendorName".to_string()];
-            let delta_store = Arc::new( DeltaObjectStore::new(azure_store, output_url) );
-            
             // TODO: target_file_size, write_batch_size
             let delta_config = WriterConfig::new(table_schema, partition_columns, writer_prop, Some(200), Some(200));
             let mut delta_writer = DeltaWriter::new(delta_store, delta_config);
