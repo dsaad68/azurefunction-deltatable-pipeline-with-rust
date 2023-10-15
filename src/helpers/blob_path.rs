@@ -47,7 +47,7 @@ impl BlobPath {
 
     fn generate_abfss_uri(container_name: &String, account_name: &String, path: &String, file_name: &String) -> String {
         format!(
-            "abfss://{}@{}.dfs.core.windows.net/{}{}",
+            "abfss://{}@{}.dfs.core.windows.net{}/{}",
             container_name,
             account_name,
             path,

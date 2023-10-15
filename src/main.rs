@@ -1,7 +1,5 @@
 mod helpers;
 
-//use url::Url;
-
 use std::env;
 use std::sync::Arc;
 use std::convert::Infallible;
@@ -14,7 +12,6 @@ use hyper::service::{make_service_fn, service_fn};
 use hyper::{header, Body, Error, Request, Response, Server, StatusCode};
 
 use deltalake::arrow::csv::ReaderBuilder;
-//use deltalake::storage::DeltaObjectStore;
 use deltalake::operations::writer::{DeltaWriter, WriterConfig};
 use deltalake::arrow::datatypes::{DataType as ArrowDataType, Field as ArrowField, Schema as ArrowSchema};
 use deltalake::parquet::{
@@ -23,9 +20,10 @@ use deltalake::parquet::{
 };
 
 use helpers::blob_path::BlobPath;
+use helpers::delta_ops::get_delta_store;
 use helpers::blob_event::{BlobEvent,Root};
 use helpers::azure_storage::{get_azure_store, fetch_file};
-use helpers::delta_ops::get_delta_store;
+
 
 async fn handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
 
@@ -64,14 +62,14 @@ async fn handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
             let blob_event = BlobEvent::from(deserialized_data);
             println!("{:?}", blob_event);
 
-            // create a blob_path object
+            // Create a blob_path object
             let blob_path = BlobPath::from_blob_url(& blob_event.blob_url).unwrap();
             println!("{:?}", & blob_path);
 
-            // create an azure store object
+            // Create an azure store object
             let azure_store = get_azure_store("samples-workitems");
 
-            // fetch the file from azure storage
+            // Fetch the file from azure storage
             let fetched = fetch_file(azure_store.clone(), blob_path).await;
 
             let schema = ArrowSchema::new(vec![
@@ -86,9 +84,11 @@ async fn handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
             let table_schema = schema.clone();
             
             let reader = fetched.reader();
-            // create csv reader
+            
+            // Create a csv reader
             let mut csv = ReaderBuilder::new(schema).has_header(true).build(reader).unwrap();
-
+            
+            // Create a RecordBatch Object from CSV
             let record_batch = csv.next().unwrap().unwrap();
             
             // Use properties builder to set certain options and assemble the configuration.
@@ -100,11 +100,12 @@ async fn handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
                 .try_into()
                 .unwrap();
             
-            let output_path = "https://ds0learning0adls.blob.core.windows.net/samples-workitems/vendors/";
-            let delta_store = get_delta_store("samples-workitems", output_path);
+            let output_path = "https://ds0learning0adls.blob.core.windows.net";
+            let delta_store = get_delta_store("samples-workitems/vendors", output_path);
 
             let partition_columns = vec!["VendorName".to_string()];
             // TODO: target_file_size, write_batch_size
+            // TODO: Add append option
             let delta_config = WriterConfig::new(table_schema, partition_columns, writer_prop, Some(200), Some(200));
             let mut delta_writer = DeltaWriter::new(delta_store, delta_config);
 
