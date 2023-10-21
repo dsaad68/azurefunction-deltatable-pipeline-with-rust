@@ -8,6 +8,9 @@ use bytes::Buf;
 
 use serde_json::{Value, json};
 
+#[allow(unused_imports)]
+use log::{ info, error, debug, warn };
+
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{header, Body, Error, Request, Response, Server, StatusCode};
 
@@ -60,11 +63,11 @@ async fn handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
 
             // Convert the Root instance to a BlobEvent instance
             let blob_event = BlobEvent::from(deserialized_data);
-            println!("{:?}", blob_event);
+            info!("{:?}", blob_event);
 
             // Create a blob_path object
             let blob_path = BlobPath::from_blob_url(& blob_event.blob_url).unwrap();
-            println!("{:?}", & blob_path);
+            info!("{:?}", & blob_path);
 
             // Create an azure store object
             let azure_store = get_azure_store("samples-workitems");
@@ -104,9 +107,10 @@ async fn handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
             let delta_store = get_delta_store("samples-workitems/vendors", output_path);
 
             let partition_columns = vec!["VendorName".to_string()];
-            // TODO: target_file_size, write_batch_size
-            // TODO: Add append option
-            let delta_config = WriterConfig::new(table_schema, partition_columns, writer_prop, Some(200), Some(200));
+
+            // TODO: Add append option; deltalake::operations::merge
+            // INFO: target_file_size, write_batch_size default values are defined in deltalake::operations::writer
+            let delta_config = WriterConfig::new(table_schema, partition_columns, writer_prop, None, None);
             let mut delta_writer = DeltaWriter::new(delta_store, delta_config);
 
             delta_writer.write(&record_batch).await.unwrap();
@@ -121,7 +125,7 @@ async fn handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
         }
         Err(err) => {
             // Handle JSON parsing error here.
-            eprintln!("Error parsing JSON: {:?}", err);
+            error!("Error parsing JSON: {:?}", err);
             // Return an appropriate error response.
             let response = Response::builder()
                 .status(StatusCode::BAD_REQUEST)
@@ -136,6 +140,8 @@ async fn handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
 #[tokio::main]
 async fn main() -> Result<(), Error> {
 
+    env_logger::init();
+
     let port_key = "FUNCTIONS_CUSTOMHANDLER_PORT";
     let port: u16 = match env::var(port_key) {
         Ok(val) => val.parse().expect("Custom Handler port is not a number!"),
@@ -147,7 +153,7 @@ async fn main() -> Result<(), Error> {
         Ok::<_, Infallible>(service_fn(handler))
     }));
 
-    println!("Listening on http://{}", addr);
+    info!("Listening on http://{}", addr);
 
     server.await
 
