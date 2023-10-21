@@ -19,6 +19,6 @@ serde = { version = "1.0.189", features = ["derive"] }
 hyper = { version = "0.14.27", features = ["full"] }
 tokio = { version = "1.33.0", features = ["full"] }
 object_store = {version = "0.7.1", features = ["azure"] }
-deltalake = { version="0.16.1", features = ["azure", "parquet"]  }
+deltalake = { version="0.16.2", features = ["azure", "parquet"]  }
 # arrow = {version = "47.0.0", features = ["csv"]}
-polars = { git = "https://github.com/pola-rs/polars", features = ["describe", "lazy", "ndarray", "object", "dtype-struct", "concat_str", "mode"] }
+# polars = { git = "https://github.com/pola-rs/polars", features = ["describe", "lazy", "ndarray", "object", "dtype-struct", "concat_str", "mode"] }
