@@ -9,7 +9,7 @@ edition = "2021"
 url = "2.4.1"
 log = "0.4.20"
 bytes = "1.5.0"
-parquet ="47.0.0"
+parquet ="48.0.0"
 futures ="0.3.28"
 env_logger = "0.10.0"
 chrono-tz = "0.8.3"
@@ -19,6 +19,7 @@ serde = { version = "1.0.189", features = ["derive"] }
 hyper = { version = "0.14.27", features = ["full"] }
 tokio = { version = "1.33.0", features = ["full"] }
 object_store = {version = "0.7.1", features = ["azure"] }
-deltalake = { version="0.16.2", features = ["azure", "parquet"]  }
+deltalake = { version="0.16.2", features = ["azure", "parquet", "datafusion"]  }
+# datafusion-expr = "32.0.0"
 # arrow = {version = "47.0.0", features = ["csv"]}
 # polars = { git = "https://github.com/pola-rs/polars", features = ["describe", "lazy", "ndarray", "object", "dtype-struct", "concat_str", "mode"] }

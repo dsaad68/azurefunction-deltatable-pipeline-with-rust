@@ -6,6 +6,7 @@ use std::convert::Infallible;
 
 use bytes::Buf;
 
+
 use serde_json::{Value, json};
 
 #[allow(unused_imports)]
@@ -14,13 +15,29 @@ use log::{ info, error, debug, warn };
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{header, Body, Error, Request, Response, Server, StatusCode};
 
+use deltalake::protocol::*;
+#[allow(unused_imports)]
+use deltalake::DeltaTable;
 use deltalake::arrow::csv::ReaderBuilder;
+#[allow(unused_imports)]
 use deltalake::operations::writer::{DeltaWriter, WriterConfig};
+#[allow(unused_imports)]
+use deltalake::operations::create::CreateBuilder;
+use deltalake::operations::DeltaOps;
 use deltalake::arrow::datatypes::{DataType as ArrowDataType, Field as ArrowField, Schema as ArrowSchema};
+use deltalake::schema::Schema as DeltaSchema;
 use deltalake::parquet::{
     basic::{Compression, Encoding},
     file::properties::*,
 };
+
+#[allow(unused_imports)]
+use deltalake::datafusion::prelude::SessionContext;
+#[allow(unused_imports)]
+use deltalake::datafusion::logical_expr::{col,lit};
+
+#[allow(unused_imports)]
+use deltalake::DeltaTableBuilder;
 
 use helpers::blob_path::BlobPath;
 use helpers::delta_ops::get_delta_store;
@@ -84,7 +101,11 @@ async fn handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
             ]);
 
             let schema = Arc::new(schema);
+            #[allow(unused)]
             let table_schema = schema.clone();
+
+            let delta_schema = schema.clone();
+            let delta_schema = DeltaSchema::try_from(delta_schema).unwrap();
             
             let reader = fetched.reader();
             
@@ -95,6 +116,7 @@ async fn handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
             let record_batch = csv.next().unwrap().unwrap();
             
             // Use properties builder to set certain options and assemble the configuration.
+            #[allow(unused)]
             let writer_prop: Option<WriterProperties> = WriterProperties::builder()
                 .set_writer_version(WriterVersion::PARQUET_2_0)
                 .set_encoding(Encoding::PLAIN)
@@ -108,13 +130,60 @@ async fn handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
 
             let partition_columns = vec!["VendorName".to_string()];
 
-            // TODO: Add append option; deltalake::operations::merge
-            // INFO: target_file_size, write_batch_size default values are defined in deltalake::operations::writer
-            let delta_config = WriterConfig::new(table_schema, partition_columns, writer_prop, None, None);
-            let mut delta_writer = DeltaWriter::new(delta_store, delta_config);
+            // LEARN: unwrap_or_default
+            // STEP 1: create a delta table
+            let incoming_table = DeltaOps::new_in_memory()
+                                    .create()
+                                    .with_columns(delta_schema.get_fields().clone())
+                                    .with_partition_columns(& partition_columns)
+                                    .await
+                                    .unwrap();
 
-            delta_writer.write(&record_batch).await.unwrap();
-            delta_writer.close().await.unwrap();
+            // STEP 2: write some data
+            DeltaOps(incoming_table)
+                .write(vec![record_batch.clone()])
+                .with_save_mode(SaveMode::Append)
+                .await
+                .unwrap();
+
+            // LEARN: #[cfg(feature = "datafusion")]
+
+            // STEP3: Check if there table already there
+            // #[allow(unused)]
+            // let source_table = CreateBuilder::new()
+            //                 .with_object_store(delta_store.clone())
+            //                 .with_columns(delta_schema.get_fields().clone())
+            //                 .with_partition_columns(& partition_columns)
+            //                 .with_save_mode(SaveMode::Append)
+            //                 .await
+            //                 .unwrap();
+
+            // STEP 5: Merge Operation
+            // #[allow(unused)]
+            // let (mut table, metrics) = DeltaOps(incoming_table)
+            // .merge(source, col("id").eq(col("source.id")))
+            // .with_source_alias("source")
+            // .when_matched_update(|update| {
+            //     update
+            //         .update("value", col("source.value"))
+            //         .update("modified", col("source.modified"))
+            // })
+            // .unwrap()
+            // .when_not_matched_by_source_update(|update| {
+            //     update
+            //         .predicate(col("value").eq(lit(1)))
+            //         .update("value", col("value") + lit(1))
+            // })
+            // .unwrap()
+            // .when_not_matched_insert(|insert| {
+            //     insert
+            //         .set("id", col("source.id"))
+            //         .set("value", col("source.value"))
+            //         .set("modified", col("source.modified"))
+            // })
+            // .unwrap()
+            // .await
+            // .unwrap();
 
             let response = Response::builder()
                 .status(StatusCode::OK)
