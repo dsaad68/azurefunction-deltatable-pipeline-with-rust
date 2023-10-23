@@ -6,7 +6,6 @@ use std::convert::Infallible;
 
 use bytes::Buf;
 
-
 use serde_json::{Value, json};
 
 #[allow(unused_imports)]
@@ -132,10 +131,9 @@ async fn handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
 
             // LEARN: unwrap_or_default
             // STEP 1: create a delta table
-            let incoming_table = DeltaOps::new_in_memory()
-                                    .create()
+            let incoming_table = CreateBuilder::new()
+                                    .with_object_store(delta_store)
                                     .with_columns(delta_schema.get_fields().clone())
-                                    .with_partition_columns(& partition_columns)
                                     .await
                                     .unwrap();
 
@@ -143,6 +141,7 @@ async fn handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
             DeltaOps(incoming_table)
                 .write(vec![record_batch.clone()])
                 .with_save_mode(SaveMode::Append)
+                .with_partition_columns(partition_columns)
                 .await
                 .unwrap();
 
