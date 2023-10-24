@@ -130,14 +130,22 @@ async fn handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
 
             let output_path = "abfs://samples-workitems@ds0learning0adls.dfs.core.windows.net/vendors/";
 
+            DeltaOps::try_from_uri(output_path)
+                        .await
+                        .unwrap()
+                        .write(vec![record_batch.clone()])
+                        .with_save_mode(SaveMode::Append)
+                        .await
+                        .unwrap();
+
             // LEARN: unwrap_or_default
             // STEP 2: Check if the table exist
-            let table = CreateBuilder::new()
-                                .with_location(output_path)
-                                .with_storage_options(backend_config.clone())
-                                .with_columns(delta_schema.get_fields().clone())
-                                .await
-                                .unwrap();
+            // let table = CreateBuilder::new()
+            //                     .with_location(output_path)
+            //                     .with_storage_options(backend_config.clone())
+            //                     .with_columns(delta_schema.get_fields().clone())
+            //                     .await
+            //                     .unwrap();
 
             // STEP 3: Create refrence to the table 
             // let table = DeltaTableBuilder::from_uri(output_path)
@@ -146,12 +154,12 @@ async fn handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
             //     .unwrap();
 
             // STEP 4: write some data 
-            #[allow(unused)]
-            let ops = DeltaOps::from(table)
-                        .write(vec![record_batch.clone()])
-                        .with_save_mode(SaveMode::Overwrite)
-                        .await
-                        .unwrap();
+            // #[allow(unused)]
+            // let ops = DeltaOps::from(table)
+            //             .write(vec![record_batch.clone()])
+            //             .with_save_mode(SaveMode::Overwrite)
+            //             .await
+            //             .unwrap();
 
             // LEARN: #[cfg(feature = "datafusion")]
 
