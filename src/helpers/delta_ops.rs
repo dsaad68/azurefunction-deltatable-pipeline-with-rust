@@ -3,8 +3,8 @@ use url::Url;
 use std::sync::Arc;
 use deltalake::storage::DeltaObjectStore;
 use object_store::azure::MicrosoftAzureBuilder;
-
-pub fn get_delta_store(container_name: &str ,output_url: &str) -> Arc<DeltaObjectStore>{
+#[allow(unused)]
+pub fn get_delta_store(container_name: &str, output_url: &str) -> Arc<DeltaObjectStore>{
 
     let azure_store = MicrosoftAzureBuilder::from_env()
     .with_container_name(container_name)

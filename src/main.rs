@@ -1,6 +1,7 @@
 mod helpers;
 
 use std::env;
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::convert::Infallible;
 
@@ -14,6 +15,7 @@ use log::{ info, error, debug, warn };
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{header, Body, Error, Request, Response, Server, StatusCode};
 
+#[allow(unused_imports)]
 use deltalake::protocol::*;
 #[allow(unused_imports)]
 use deltalake::DeltaTable;
@@ -25,10 +27,10 @@ use deltalake::operations::create::CreateBuilder;
 use deltalake::operations::DeltaOps;
 use deltalake::arrow::datatypes::{DataType as ArrowDataType, Field as ArrowField, Schema as ArrowSchema};
 use deltalake::schema::Schema as DeltaSchema;
-use deltalake::parquet::{
-    basic::{Compression, Encoding},
-    file::properties::*,
-};
+// use deltalake::parquet::{
+//     basic::{Compression, Encoding},
+//     file::properties::*,
+// };
 
 #[allow(unused_imports)]
 use deltalake::datafusion::prelude::SessionContext;
@@ -39,6 +41,7 @@ use deltalake::datafusion::logical_expr::{col,lit};
 use deltalake::DeltaTableBuilder;
 
 use helpers::blob_path::BlobPath;
+#[allow(unused_imports)]
 use helpers::delta_ops::get_delta_store;
 use helpers::blob_event::{BlobEvent,Root};
 use helpers::azure_storage::{get_azure_store, fetch_file};
@@ -114,36 +117,41 @@ async fn handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
             // Create a RecordBatch Object from CSV
             let record_batch = csv.next().unwrap().unwrap();
             
-            // Use properties builder to set certain options and assemble the configuration.
+            // let output_path = "https://ds0learning0adls.blob.core.windows.net";
+            // #[allow(unused)]
+            // let delta_store = get_delta_store("samples-workitems/vendors", output_path);
             #[allow(unused)]
-            let writer_prop: Option<WriterProperties> = WriterProperties::builder()
-                .set_writer_version(WriterVersion::PARQUET_2_0)
-                .set_encoding(Encoding::PLAIN)
-                .set_compression(Compression::SNAPPY)
-                .build()
-                .try_into()
-                .unwrap();
-            
-            let output_path = "https://ds0learning0adls.blob.core.windows.net";
-            let delta_store = get_delta_store("samples-workitems/vendors", output_path);
-
             let partition_columns = vec!["VendorName".to_string()];
 
-            // LEARN: unwrap_or_default
-            // STEP 1: create a delta table
-            let incoming_table = CreateBuilder::new()
-                                    .with_object_store(delta_store)
-                                    .with_columns(delta_schema.get_fields().clone())
-                                    .await
-                                    .unwrap();
+            // STEP 1: get the need variable and create backend config
+            let azure_storage_access_key = std::env::var("AZURE_STORAGE_ACCOUNT_KEY").unwrap();
+            let mut backend_config: HashMap<String, String> = HashMap::new();
+            backend_config.insert("azure_storage_access_key".to_string(), azure_storage_access_key);
 
-            // STEP 2: write some data
-            DeltaOps(incoming_table)
-                .write(vec![record_batch.clone()])
-                .with_save_mode(SaveMode::Append)
-                .with_partition_columns(partition_columns)
-                .await
-                .unwrap();
+            let output_path = "abfs://samples-workitems@ds0learning0adls.dfs.core.windows.net/vendors/";
+
+            // LEARN: unwrap_or_default
+            // STEP 2: Check if the table exist
+            let table = CreateBuilder::new()
+                                .with_location(output_path)
+                                .with_storage_options(backend_config.clone())
+                                .with_columns(delta_schema.get_fields().clone())
+                                .await
+                                .unwrap();
+
+            // STEP 3: Create refrence to the table 
+            // let table = DeltaTableBuilder::from_uri(output_path)
+            //     .with_storage_options(backend_config.clone())
+            //     .build()
+            //     .unwrap();
+
+            // STEP 4: write some data 
+            #[allow(unused)]
+            let ops = DeltaOps::from(table)
+                        .write(vec![record_batch.clone()])
+                        .with_save_mode(SaveMode::Overwrite)
+                        .await
+                        .unwrap();
 
             // LEARN: #[cfg(feature = "datafusion")]
 
@@ -208,6 +216,7 @@ async fn handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
 #[tokio::main]
 async fn main() -> Result<(), Error> {
 
+    // LEARN: Logging
     env_logger::init();
 
     let port_key = "FUNCTIONS_CUSTOMHANDLER_PORT";
