@@ -1,54 +1,58 @@
+// LEARN: unwrap_or_default
+// LEARN: #[cfg(feature = "datafusion")]
+
 mod helpers;
 
-use std::env;
 use std::collections::HashMap;
-use std::sync::Arc;
 use std::convert::Infallible;
+use std::env;
+use std::sync::Arc;
 
 use bytes::Buf;
 
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 #[allow(unused_imports)]
-use log::{ info, error, debug, warn };
+use log::{debug, error, info, warn};
 
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{header, Body, Error, Request, Response, Server, StatusCode};
 
+use deltalake::arrow::csv::ReaderBuilder;
+use deltalake::arrow::datatypes::{
+    DataType as ArrowDataType, Field as ArrowField, Schema as ArrowSchema,
+};
+#[allow(unused_imports)]
+use deltalake::operations::create::CreateBuilder;
+#[allow(unused_imports)]
+use deltalake::operations::writer::{DeltaWriter, WriterConfig};
+use deltalake::operations::DeltaOps;
 #[allow(unused_imports)]
 use deltalake::protocol::*;
 #[allow(unused_imports)]
 use deltalake::DeltaTable;
-use deltalake::arrow::csv::ReaderBuilder;
-#[allow(unused_imports)]
-use deltalake::operations::writer::{DeltaWriter, WriterConfig};
-#[allow(unused_imports)]
-use deltalake::operations::create::CreateBuilder;
-use deltalake::operations::DeltaOps;
-use deltalake::arrow::datatypes::{DataType as ArrowDataType, Field as ArrowField, Schema as ArrowSchema};
-use deltalake::schema::Schema as DeltaSchema;
-// use deltalake::parquet::{
-//     basic::{Compression, Encoding},
-//     file::properties::*,
-// };
 
 #[allow(unused_imports)]
-use deltalake::datafusion::prelude::SessionContext;
+use deltalake::schema::Schema as DeltaSchema;
+
+use deltalake::DeltaResult;
+use deltalake::DeltaTableError;
+
 #[allow(unused_imports)]
-use deltalake::datafusion::logical_expr::{col,lit};
+use deltalake::datafusion::logical_expr::{col, lit};
+#[allow(unused_imports)]
+use deltalake::datafusion::prelude::SessionContext;
 
 #[allow(unused_imports)]
 use deltalake::DeltaTableBuilder;
 
+use helpers::azure_storage::{fetch_file, get_azure_store};
+use helpers::blob_event::{BlobEvent, Root};
 use helpers::blob_path::BlobPath;
 #[allow(unused_imports)]
 use helpers::delta_ops::get_delta_store;
-use helpers::blob_event::{BlobEvent,Root};
-use helpers::azure_storage::{get_azure_store, fetch_file};
-
 
 async fn handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
-
     println!("Rust HTTP trigger function begun");
 
     // Read the request body as bytes.
@@ -68,7 +72,9 @@ async fn handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
         return Ok(Response::builder()
             .status(StatusCode::NO_CONTENT)
             .header(header::CONTENT_TYPE, "application/json")
-            .body(Body::from("{ 'body' : 'No Content Success Status Response Code!'}"))
+            .body(Body::from(
+                "{ 'body' : 'No Content Success Status Response Code!'}",
+            ))
             .unwrap());
     }
 
@@ -77,7 +83,6 @@ async fn handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
 
     match json_request {
         Ok(json_request) => {
-
             let deserialized_data: Root = serde_json::from_str(&json_request.to_string()).unwrap();
 
             // Convert the Root instance to a BlobEvent instance
@@ -85,8 +90,8 @@ async fn handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
             info!("{:?}", blob_event);
 
             // Create a blob_path object
-            let blob_path = BlobPath::from_blob_url(& blob_event.blob_url).unwrap();
-            info!("{:?}", & blob_path);
+            let blob_path = BlobPath::from_blob_url(&blob_event.blob_url).unwrap();
+            info!("{:?}", &blob_path);
 
             // Create an azure store object
             let azure_store = get_azure_store("samples-workitems");
@@ -103,102 +108,82 @@ async fn handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
             ]);
 
             let schema = Arc::new(schema);
-            #[allow(unused)]
-            let table_schema = schema.clone();
 
-            let delta_schema = schema.clone();
-            let delta_schema = DeltaSchema::try_from(delta_schema).unwrap();
-            
+            //let table_schema = schema.clone();
+            // let delta_schema = schema.clone();
+            // let delta_schema = DeltaSchema::try_from(delta_schema).unwrap();
+            //let partition_columns = vec!["VendorName".to_string()];
+
             let reader = fetched.reader();
-            
+
             // Create a csv reader
-            let mut csv = ReaderBuilder::new(schema).has_header(true).build(reader).unwrap();
-            
+            let mut csv = ReaderBuilder::new(schema)
+                .has_header(true)
+                .build(reader)
+                .unwrap();
+
             // Create a RecordBatch Object from CSV
             let record_batch = csv.next().unwrap().unwrap();
-            
-            // let output_path = "https://ds0learning0adls.blob.core.windows.net";
-            // #[allow(unused)]
-            // let delta_store = get_delta_store("samples-workitems/vendors", output_path);
-            #[allow(unused)]
-            let partition_columns = vec!["VendorName".to_string()];
 
-            // STEP 1: get the need variable and create backend config
+            // STEP 1: Creating a Datafusion Dataframe from a record batch
+            let ctx = SessionContext::new();
+            let source = ctx.read_batch(record_batch.clone()).unwrap();
+
+            // STEP 2: get the need variable and create backend config
             let azure_storage_access_key = std::env::var("AZURE_STORAGE_ACCOUNT_KEY").unwrap();
             let mut backend_config: HashMap<String, String> = HashMap::new();
-            backend_config.insert("azure_storage_access_key".to_string(), azure_storage_access_key);
+            backend_config.insert(
+                "azure_storage_access_key".to_string(),
+                azure_storage_access_key,
+            );
 
-            let output_path = "abfs://samples-workitems@ds0learning0adls.dfs.core.windows.net/vendors/";
+            let delta_table_path =
+                "abfs://samples-workitems@ds0learning0adls.dfs.core.windows.net/vendors/";
 
-            DeltaOps::try_from_uri(output_path)
-                        .await
-                        .unwrap()
-                        .write(vec![record_batch.clone()])
-                        .with_save_mode(SaveMode::Append)
-                        .await
-                        .unwrap();
+            // STEP 3: get the table source, if it doesn't exist create it
+            let table = DeltaTableBuilder::from_uri(delta_table_path)
+                .with_storage_options(backend_config)
+                .load()
+                .await
+                .unwrap();
 
-            // LEARN: unwrap_or_default
-            // STEP 2: Check if the table exist
-            // let table = CreateBuilder::new()
-            //                     .with_location(output_path)
-            //                     .with_storage_options(backend_config.clone())
-            //                     .with_columns(delta_schema.get_fields().clone())
-            //                     .await
-            //                     .unwrap();
+            ctx.register_table("test", Arc::new(table)).unwrap();
+            ctx.sql("select * from test")
+                    .await
+                    .unwrap()
+                    .collect()
+                    .await
+                    .unwrap();
 
-            // STEP 3: Create refrence to the table 
-            // let table = DeltaTableBuilder::from_uri(output_path)
-            //     .with_storage_options(backend_config.clone())
-            //     .build()
-            //     .unwrap();
-
-            // STEP 4: write some data 
-            // #[allow(unused)]
-            // let ops = DeltaOps::from(table)
-            //             .write(vec![record_batch.clone()])
-            //             .with_save_mode(SaveMode::Overwrite)
-            //             .await
-            //             .unwrap();
-
-            // LEARN: #[cfg(feature = "datafusion")]
-
-            // STEP3: Check if there table already there
-            // #[allow(unused)]
-            // let source_table = CreateBuilder::new()
-            //                 .with_object_store(delta_store.clone())
-            //                 .with_columns(delta_schema.get_fields().clone())
-            //                 .with_partition_columns(& partition_columns)
-            //                 .with_save_mode(SaveMode::Append)
-            //                 .await
-            //                 .unwrap();
+            // let delta_ops_result: DeltaResult<DeltaOps> = match table.load().await {
+            //     Ok(_) => Ok(table.into()),
+            //     Err(DeltaTableError::NotATable(_)) => Ok(table.into()),
+            //     Err(err) => Err(err),
+            // };
 
             // STEP 5: Merge Operation
             // #[allow(unused)]
-            // let (mut table, metrics) = DeltaOps(incoming_table)
-            // .merge(source, col("id").eq(col("source.id")))
-            // .with_source_alias("source")
-            // .when_matched_update(|update| {
-            //     update
-            //         .update("value", col("source.value"))
-            //         .update("modified", col("source.modified"))
-            // })
-            // .unwrap()
-            // .when_not_matched_by_source_update(|update| {
-            //     update
-            //         .predicate(col("value").eq(lit(1)))
-            //         .update("value", col("value") + lit(1))
-            // })
-            // .unwrap()
-            // .when_not_matched_insert(|insert| {
-            //     insert
-            //         .set("id", col("source.id"))
-            //         .set("value", col("source.value"))
-            //         .set("modified", col("source.modified"))
-            // })
-            // .unwrap()
-            // .await
-            // .unwrap();
+            // let (mut table, metrics) = DeltaOps(table)
+            //     .merge(source, col("VendorID").eq(col("source.VendorID")))
+            //     .with_source_alias("source")
+            //     .when_matched_update(|update| {
+            //         update
+            //             .update("AccountNumber", col("source.AccountNumber"))
+            //             .update("CreditRating", col("source.CreditRating"))
+            //             .update("ActiveFlag", col("source.ActiveFlag"))
+            //     })
+            //     .unwrap()
+            //     .when_not_matched_insert(|insert| {
+            //         insert
+            //             .set("VendorID", col("source.VendorID"))
+            //             .set("VendorName", col("source.VendorName"))
+            //             .set("AccountNumber", col("source.AccountNumber"))
+            //             .set("CreditRating", col("source.CreditRating"))
+            //             .set("ActiveFlag", col("source.ActiveFlag"))
+            //     })
+            //     .unwrap()
+            //     .await
+            //     .unwrap();
 
             let response = Response::builder()
                 .status(StatusCode::OK)
@@ -214,7 +199,12 @@ async fn handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
             let response = Response::builder()
                 .status(StatusCode::BAD_REQUEST)
                 .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(serde_json::to_string(&json!({ "Body": format!("Error parsing JSON: {:?}", err) })).unwrap()))
+                .body(Body::from(
+                    serde_json::to_string(
+                        &json!({ "Body": format!("Error parsing JSON: {:?}", err) }),
+                    )
+                    .unwrap(),
+                ))
                 .unwrap();
             Ok(response)
         }
@@ -223,7 +213,6 @@ async fn handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
-
     // LEARN: Logging
     env_logger::init();
 
@@ -241,5 +230,4 @@ async fn main() -> Result<(), Error> {
     info!("Listening on http://{}", addr);
 
     server.await
-
 }
