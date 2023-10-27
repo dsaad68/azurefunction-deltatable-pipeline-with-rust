@@ -13,27 +13,24 @@ use bytes::Buf;
 use serde_json::{json, Value};
 
 #[allow(unused_imports)]
-use log::{debug, error, info, warn};
+use log::{error, info, warn};
 
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{header, Body, Error, Request, Response, Server, StatusCode};
+
+use deltalake::operations::create::CreateBuilder;
+use deltalake::operations::DeltaOps;
+use deltalake::protocol::SaveMode;
+use deltalake::schema::Schema as DeltaSchema;
+#[allow(unused_imports)]
+use deltalake::DeltaTable;
+use deltalake::DeltaTableBuilder;
+use deltalake::DeltaTableError;
 
 use deltalake::arrow::csv::ReaderBuilder;
 use deltalake::arrow::datatypes::{
     DataType as ArrowDataType, Field as ArrowField, Schema as ArrowSchema,
 };
-#[allow(unused_imports)]
-use deltalake::operations::create::CreateBuilder;
-#[allow(unused_imports)]
-use deltalake::operations::writer::{DeltaWriter, WriterConfig};
-use deltalake::operations::DeltaOps;
-#[allow(unused_imports)]
-use deltalake::protocol::*;
-#[allow(unused_imports)]
-use deltalake::DeltaTable;
-#[allow(unused_imports)]
-use deltalake::DeltaTableBuilder;
-use deltalake::schema::Schema as DeltaSchema;
 
 #[allow(unused)]
 use deltalake::datafusion::logical_expr::{col, lit};
@@ -44,7 +41,7 @@ use helpers::blob_event::{BlobEvent, Root};
 use helpers::blob_path::BlobPath;
 
 async fn handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
-    println!("Rust HTTP trigger function begun");
+    info!("Rust HTTP trigger function begun");
 
     // Read the request body as bytes.
     let body_bytes = match hyper::body::to_bytes(req.into_body()).await {
@@ -100,11 +97,8 @@ async fn handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
             ]);
 
             let schema = Arc::new(schema);
-            
-            #[allow(unused)]
-            let table_schema = schema.clone();
+
             let delta_schema = schema.clone();
-            #[allow(unused)]
             let delta_schema = DeltaSchema::try_from(delta_schema).unwrap();
             //let partition_columns = vec!["VendorName".to_string()];
 
@@ -116,8 +110,6 @@ async fn handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
                 .build(reader)
                 .unwrap();
 
-            //    .with_delimiter(b';')
-
             // Create a RecordBatch Object from CSV
             let record_batch = csv.next().unwrap().unwrap();
 
@@ -125,7 +117,7 @@ async fn handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
             let ctx = SessionContext::new();
             let source_table = ctx.read_batch(record_batch.clone()).unwrap();
 
-            println!("{:?}", source_table.schema());
+            info!("{:?}", source_table.schema());
 
             // STEP 2: get the need variable and create backend config
             let azure_storage_access_key = std::env::var("AZURE_STORAGE_ACCOUNT_KEY").unwrap();
@@ -138,28 +130,36 @@ async fn handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
             let target_table_path =
                 "abfs://samples-workitems@ds0learning0adls.dfs.core.windows.net/userslist/";
 
-            // let target_table = CreateBuilder::new()
-            //     .with_location(target_table_path)
-            //     .with_storage_options(backend_config.clone())
-            //     .with_columns(delta_schema.get_fields().clone())
-            //     .await
-            //     .unwrap();
-
-            // let target_table = DeltaOps::from(target_table)
-            //     .write(vec![record_batch.clone()])
-            //     .with_save_mode(SaveMode::Overwrite)
-            //     .await
-            //     .unwrap();
-
             // STEP 3: get the table source, if it doesn't exist create it
-            // TODO: Handle the error when there is no table at this URI
-            let target_table = DeltaTableBuilder::from_uri(target_table_path)
-                .with_storage_options(backend_config)
+            let target_table = match DeltaTableBuilder::from_uri(target_table_path)
+                .with_storage_options(backend_config.clone())
                 .load()
                 .await
-                .unwrap();
-            
-            println!("{:?}", target_table.get_schema());
+            {
+                Ok(table) => Ok(table),
+                Err(DeltaTableError::NotATable(e)) => {
+                    warn!("{}", e);
+                    let target_table = CreateBuilder::new()
+                        .with_location(target_table_path)
+                        .with_storage_options(backend_config.clone())
+                        .with_columns(delta_schema.get_fields().clone())
+                        .await
+                        .unwrap();
+
+                    DeltaOps::from(target_table)
+                        .write(vec![record_batch.clone()])
+                        .with_save_mode(SaveMode::Overwrite)
+                        .await
+                }
+                Err(e) => {
+                    error!("{}", e);
+                    Err(e)
+                }
+            };
+
+            let target_table = target_table.unwrap();
+
+            info!("{:?}", target_table.get_schema());
 
             // STEP 4: Merge Operation
             #[allow(unused)]
@@ -187,7 +187,7 @@ async fn handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
                 .await
                 .unwrap();
 
-                // TODO: add log about tables and metrics
+            // TODO: add log about tables and metrics
 
             let response = Response::builder()
                 .status(StatusCode::OK)
@@ -218,6 +218,7 @@ async fn handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
 #[tokio::main]
 async fn main() -> Result<(), Error> {
     // LEARN: Logging
+    // LEARN: https://docs.rs/env_logger/0.10.0/env_logger/#enabling-logging
     env_logger::init();
 
     let port_key = "FUNCTIONS_CUSTOMHANDLER_PORT";
