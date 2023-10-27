@@ -31,26 +31,17 @@ use deltalake::operations::DeltaOps;
 use deltalake::protocol::*;
 #[allow(unused_imports)]
 use deltalake::DeltaTable;
-
-#[allow(unused_imports)]
-use deltalake::schema::Schema as DeltaSchema;
-
-use deltalake::DeltaResult;
-use deltalake::DeltaTableError;
-
-#[allow(unused_imports)]
-use deltalake::datafusion::logical_expr::{col, lit};
-#[allow(unused_imports)]
-use deltalake::datafusion::prelude::SessionContext;
-
 #[allow(unused_imports)]
 use deltalake::DeltaTableBuilder;
+use deltalake::schema::Schema as DeltaSchema;
+
+#[allow(unused)]
+use deltalake::datafusion::logical_expr::{col, lit};
+use deltalake::datafusion::prelude::SessionContext;
 
 use helpers::azure_storage::{fetch_file, get_azure_store};
 use helpers::blob_event::{BlobEvent, Root};
 use helpers::blob_path::BlobPath;
-#[allow(unused_imports)]
-use helpers::delta_ops::get_delta_store;
 
 async fn handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
     println!("Rust HTTP trigger function begun");
@@ -100,18 +91,21 @@ async fn handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
             let fetched = fetch_file(azure_store.clone(), blob_path).await;
 
             let schema = ArrowSchema::new(vec![
-                ArrowField::new("VendorID", ArrowDataType::Int32, false),
-                ArrowField::new("VendorName", ArrowDataType::Utf8, false),
-                ArrowField::new("AccountNumber", ArrowDataType::Utf8, false),
-                ArrowField::new("CreditRating", ArrowDataType::Int32, false),
-                ArrowField::new("ActiveFlag", ArrowDataType::Int32, false),
+                ArrowField::new("username", ArrowDataType::Utf8, false),
+                ArrowField::new("email", ArrowDataType::Utf8, false),
+                ArrowField::new("account_type", ArrowDataType::Utf8, false),
+                ArrowField::new("payment_method", ArrowDataType::Utf8, true),
+                ArrowField::new("credit_card_type", ArrowDataType::Utf8, true),
+                ArrowField::new("payment_id", ArrowDataType::Utf8, true),
             ]);
 
             let schema = Arc::new(schema);
-
-            //let table_schema = schema.clone();
-            // let delta_schema = schema.clone();
-            // let delta_schema = DeltaSchema::try_from(delta_schema).unwrap();
+            
+            #[allow(unused)]
+            let table_schema = schema.clone();
+            let delta_schema = schema.clone();
+            #[allow(unused)]
+            let delta_schema = DeltaSchema::try_from(delta_schema).unwrap();
             //let partition_columns = vec!["VendorName".to_string()];
 
             let reader = fetched.reader();
@@ -122,12 +116,16 @@ async fn handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
                 .build(reader)
                 .unwrap();
 
+            //    .with_delimiter(b';')
+
             // Create a RecordBatch Object from CSV
             let record_batch = csv.next().unwrap().unwrap();
 
             // STEP 1: Creating a Datafusion Dataframe from a record batch
             let ctx = SessionContext::new();
-            let source = ctx.read_batch(record_batch.clone()).unwrap();
+            let source_table = ctx.read_batch(record_batch.clone()).unwrap();
+
+            println!("{:?}", source_table.schema());
 
             // STEP 2: get the need variable and create backend config
             let azure_storage_access_key = std::env::var("AZURE_STORAGE_ACCOUNT_KEY").unwrap();
@@ -137,53 +135,59 @@ async fn handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
                 azure_storage_access_key,
             );
 
-            let delta_table_path =
-                "abfs://samples-workitems@ds0learning0adls.dfs.core.windows.net/vendors/";
+            let target_table_path =
+                "abfs://samples-workitems@ds0learning0adls.dfs.core.windows.net/userslist/";
+
+            // let target_table = CreateBuilder::new()
+            //     .with_location(target_table_path)
+            //     .with_storage_options(backend_config.clone())
+            //     .with_columns(delta_schema.get_fields().clone())
+            //     .await
+            //     .unwrap();
+
+            // let target_table = DeltaOps::from(target_table)
+            //     .write(vec![record_batch.clone()])
+            //     .with_save_mode(SaveMode::Overwrite)
+            //     .await
+            //     .unwrap();
 
             // STEP 3: get the table source, if it doesn't exist create it
-            let table = DeltaTableBuilder::from_uri(delta_table_path)
+            // TODO: Handle the error when there is no table at this URI
+            let target_table = DeltaTableBuilder::from_uri(target_table_path)
                 .with_storage_options(backend_config)
                 .load()
                 .await
                 .unwrap();
+            
+            println!("{:?}", target_table.get_schema());
 
-            ctx.register_table("test", Arc::new(table)).unwrap();
-            ctx.sql("select * from test")
-                    .await
-                    .unwrap()
-                    .collect()
-                    .await
-                    .unwrap();
+            // STEP 4: Merge Operation
+            #[allow(unused)]
+            let (mut table, metrics) = DeltaOps(target_table)
+                .merge(source_table, col("username").eq(col("source.username")))
+                .with_source_alias("source")
+                .when_matched_update(|update| {
+                    update
+                        .update("account_type", col("source.account_type"))
+                        .update("payment_method", col("source.payment_method"))
+                        .update("credit_card_type", col("source.credit_card_type"))
+                        .update("payment_id", col("source.payment_id"))
+                })
+                .unwrap()
+                .when_not_matched_insert(|insert| {
+                    insert
+                        .set("username", col("source.username"))
+                        .set("email", col("source.email"))
+                        .set("account_type", col("source.account_type"))
+                        .set("payment_method", col("source.payment_method"))
+                        .set("credit_card_type", col("source.credit_card_type"))
+                        .set("payment_id", col("source.payment_id"))
+                })
+                .unwrap()
+                .await
+                .unwrap();
 
-            // let delta_ops_result: DeltaResult<DeltaOps> = match table.load().await {
-            //     Ok(_) => Ok(table.into()),
-            //     Err(DeltaTableError::NotATable(_)) => Ok(table.into()),
-            //     Err(err) => Err(err),
-            // };
-
-            // STEP 5: Merge Operation
-            // #[allow(unused)]
-            // let (mut table, metrics) = DeltaOps(table)
-            //     .merge(source, col("VendorID").eq(col("source.VendorID")))
-            //     .with_source_alias("source")
-            //     .when_matched_update(|update| {
-            //         update
-            //             .update("AccountNumber", col("source.AccountNumber"))
-            //             .update("CreditRating", col("source.CreditRating"))
-            //             .update("ActiveFlag", col("source.ActiveFlag"))
-            //     })
-            //     .unwrap()
-            //     .when_not_matched_insert(|insert| {
-            //         insert
-            //             .set("VendorID", col("source.VendorID"))
-            //             .set("VendorName", col("source.VendorName"))
-            //             .set("AccountNumber", col("source.AccountNumber"))
-            //             .set("CreditRating", col("source.CreditRating"))
-            //             .set("ActiveFlag", col("source.ActiveFlag"))
-            //     })
-            //     .unwrap()
-            //     .await
-            //     .unwrap();
+                // TODO: add log about tables and metrics
 
             let response = Response::builder()
                 .status(StatusCode::OK)
