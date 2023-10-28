@@ -30,7 +30,7 @@ pub fn get_delta_store(container_name: &str, output_url: &str) -> Arc<DeltaObjec
 }
 
 #[allow(unused)]
-async fn create_and_write_table(
+pub async fn create_and_write_table(
     record_batch: &RecordBatch,
     delta_schema: DeltaSchema,
     target_table_path: &str,
@@ -46,6 +46,8 @@ async fn create_and_write_table(
         .write(vec![record_batch.clone()])
         .with_save_mode(SaveMode::Overwrite)
         .await
+
+    // TODO: Print Table Schema
 }
 
 #[allow(unused)]

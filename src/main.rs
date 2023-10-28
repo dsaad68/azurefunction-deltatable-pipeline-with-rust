@@ -21,8 +21,11 @@ use log::{error, info, warn};
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{header, Body, Error, Request, Response, Server, StatusCode};
 
+#[allow(unused_imports)]
 use deltalake::operations::create::CreateBuilder;
+#[allow(unused_imports)]
 use deltalake::operations::DeltaOps;
+#[allow(unused_imports)]
 use deltalake::protocol::SaveMode;
 use deltalake::schema::Schema as DeltaSchema;
 #[allow(unused_imports)]
@@ -42,6 +45,8 @@ use deltalake::datafusion::prelude::SessionContext;
 use helpers::azure_storage::{fetch_file, get_azure_store};
 use helpers::blob_event::{BlobEvent, Root};
 use helpers::blob_path::BlobPath;
+use helpers::merge_func::user_list_merge;
+use helpers::delta_ops::create_and_write_table;
 
 async fn handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
     info!("Rust HTTP trigger function begun");
@@ -134,26 +139,21 @@ async fn handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
                 "abfs://samples-workitems@ds0learning0adls.dfs.core.windows.net/userslist/";
 
             // STEP 3: get the table source, if it doesn't exist create it
-            let target_table = match DeltaTableBuilder::from_uri(target_table_path)
+            let _ = match DeltaTableBuilder::from_uri(target_table_path)
                 .with_storage_options(backend_config.clone())
                 .load()
                 .await
             {
-                Ok(table) => Ok(table),
+                Ok(table) => {
+                    user_list_merge(table, source_table).await;
+                    Ok(())
+                },
                 // if the table does not exist, create it
                 Err(DeltaTableError::NotATable(e)) => {
                     warn!("{}", e);
-                    let target_table = CreateBuilder::new()
-                        .with_location(target_table_path)
-                        .with_storage_options(backend_config.clone())
-                        .with_columns(delta_schema.get_fields().clone())
-                        .await
-                        .unwrap();
-                    // write the readed csv into the delta table
-                    DeltaOps::from(target_table)
-                        .write(vec![record_batch.clone()])
-                        .with_save_mode(SaveMode::Overwrite)
-                        .await
+                    create_and_write_table(&record_batch, delta_schema, target_table_path, backend_config).await.unwrap();
+                    info!("Created Delta Table and wrote the data in it!");
+                    Ok(())
                 }
                 // Propagate other errors
                 Err(e) => {
@@ -161,50 +161,6 @@ async fn handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
                     Err(e)
                 }
             };
-
-            let target_table = target_table.unwrap();
-
-            info!("{:?}", target_table.get_schema());
-
-            // STEP 4: Merge Operation
-            #[allow(unused)]
-            let (mut table, metrics) = DeltaOps(target_table)
-                .merge(source_table, col("username").eq(col("source.username")))
-                .with_source_alias("source")
-                .when_matched_update(|update| {
-                    update
-                        .update("account_type", col("source.account_type"))
-                        .update("payment_method", col("source.payment_method"))
-                        .update("credit_card_type", col("source.credit_card_type"))
-                        .update("payment_id", col("source.payment_id"))
-                })
-                .unwrap()
-                .when_not_matched_insert(|insert| {
-                    insert
-                        .set("username", col("source.username"))
-                        .set("email", col("source.email"))
-                        .set("account_type", col("source.account_type"))
-                        .set("payment_method", col("source.payment_method"))
-                        .set("credit_card_type", col("source.credit_card_type"))
-                        .set("payment_id", col("source.payment_id"))
-                })
-                .unwrap()
-                .await
-                .unwrap();
-
-            info!("Table Version: {:?}", table.version());
-            info!("Number of files: {:?}", table.get_file_uris().count());
-            info!("Number of source rows: {:?}", metrics.num_source_rows);
-            info!("Number of rows insereted in target table: {:?}", metrics.num_target_rows_inserted);
-            info!("Number of rows updated in target table: {:?}", metrics.num_target_rows_updated);
-            info!("Number of rows deleted in target table: {:?}", metrics.num_target_rows_deleted);
-            info!("Number of rows copied in target table: {:?}", metrics.num_target_rows_copied);
-            info!("Number of rows output rows: {:?}", metrics.num_output_rows);
-            info!("Number of rows files added to target table: {:?}", metrics.num_target_files_added);
-            info!("Number of rows files added from target table: {:?}", metrics.num_target_files_removed);
-            info!("Execution time in ms: {:?}", metrics.execution_time_ms);
-            info!("Scan time in ms: {:?}", metrics.scan_time_ms);
-            info!("Rewrite time in ms: {:?}", metrics.rewrite_time_ms);
 
             let response = Response::builder()
                 .status(StatusCode::OK)
