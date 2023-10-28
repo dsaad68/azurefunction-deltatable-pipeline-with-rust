@@ -1,9 +1,6 @@
 // LEARN: unwrap_or_default
 // LEARN: #[cfg(feature = "datafusion")]
 
-// TODO 1: improve the errors
-// TODO 2: read the csv with datafusion context
-
 mod helpers;
 
 use std::collections::HashMap;
@@ -16,24 +13,26 @@ use bytes::Buf;
 use serde_json::{json, Value};
 
 #[allow(unused_imports)]
-use log::{error, info, warn};
+use log::{debug, error, info, warn};
 
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{header, Body, Error, Request, Response, Server, StatusCode};
-
-use deltalake::operations::create::CreateBuilder;
-use deltalake::operations::DeltaOps;
-use deltalake::protocol::SaveMode;
-use deltalake::schema::Schema as DeltaSchema;
-#[allow(unused_imports)]
-use deltalake::DeltaTable;
-use deltalake::DeltaTableBuilder;
-use deltalake::DeltaTableError;
 
 use deltalake::arrow::csv::ReaderBuilder;
 use deltalake::arrow::datatypes::{
     DataType as ArrowDataType, Field as ArrowField, Schema as ArrowSchema,
 };
+#[allow(unused_imports)]
+use deltalake::operations::create::CreateBuilder;
+#[allow(unused_imports)]
+use deltalake::operations::writer::{DeltaWriter, WriterConfig};
+use deltalake::operations::DeltaOps;
+#[allow(unused_imports)]
+use deltalake::protocol::*;
+#[allow(unused_imports)]
+use deltalake::DeltaTable;
+use deltalake::DeltaTableBuilder;
+use deltalake::schema::Schema as DeltaSchema;
 
 #[allow(unused)]
 use deltalake::datafusion::logical_expr::{col, lit};
@@ -44,7 +43,7 @@ use helpers::blob_event::{BlobEvent, Root};
 use helpers::blob_path::BlobPath;
 
 async fn handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
-    info!("Rust HTTP trigger function begun");
+    println!("Rust HTTP trigger function begun");
 
     // Read the request body as bytes.
     let body_bytes = match hyper::body::to_bytes(req.into_body()).await {
@@ -91,17 +90,19 @@ async fn handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
             let fetched = fetch_file(azure_store.clone(), blob_path).await;
 
             let schema = ArrowSchema::new(vec![
-                ArrowField::new("username", ArrowDataType::Utf8, false),
-                ArrowField::new("email", ArrowDataType::Utf8, false),
-                ArrowField::new("account_type", ArrowDataType::Utf8, false),
-                ArrowField::new("payment_method", ArrowDataType::Utf8, true),
-                ArrowField::new("credit_card_type", ArrowDataType::Utf8, true),
-                ArrowField::new("payment_id", ArrowDataType::Utf8, true),
+                ArrowField::new("VendorID", ArrowDataType::Int32, false),
+                ArrowField::new("VendorName", ArrowDataType::Utf8, false),
+                ArrowField::new("AccountNumber", ArrowDataType::Utf8, false),
+                ArrowField::new("CreditRating", ArrowDataType::Int32, false),
+                ArrowField::new("ActiveFlag", ArrowDataType::Int32, false),
             ]);
 
             let schema = Arc::new(schema);
-
+            
+            #[allow(unused)]
+            let table_schema = schema.clone();
             let delta_schema = schema.clone();
+            #[allow(unused)]
             let delta_schema = DeltaSchema::try_from(delta_schema).unwrap();
             //let partition_columns = vec!["VendorName".to_string()];
 
@@ -118,9 +119,9 @@ async fn handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
 
             // STEP 1: Creating a Datafusion Dataframe from a record batch
             let ctx = SessionContext::new();
-            let source_table = ctx.read_batch(record_batch.clone()).unwrap();
+            let source = ctx.read_batch(record_batch.clone()).unwrap();
 
-            info!("{:?}", source_table.schema());
+            println!("{:?}",source.schema());
 
             // STEP 2: get the need variable and create backend config
             let azure_storage_access_key = std::env::var("AZURE_STORAGE_ACCOUNT_KEY").unwrap();
@@ -130,81 +131,54 @@ async fn handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
                 azure_storage_access_key,
             );
 
-            let target_table_path =
-                "abfs://samples-workitems@ds0learning0adls.dfs.core.windows.net/userslist/";
+            let delta_table_path =
+                "abfs://samples-workitems@ds0learning0adls.dfs.core.windows.net/vendors/";
+
+            // let table = CreateBuilder::new()
+            //     .with_location(delta_table_path)
+            //     .with_storage_options(backend_config.clone())
+            //     .with_columns(delta_schema.get_fields().clone())
+            //     .await
+            //     .unwrap();
+
+            // let ops = DeltaOps::from(table)
+            //     .write(vec![record_batch.clone()])
+            //     .with_save_mode(SaveMode::Overwrite)
+            //     .await
+            //     .unwrap();
 
             // STEP 3: get the table source, if it doesn't exist create it
-            let target_table = match DeltaTableBuilder::from_uri(target_table_path)
-                .with_storage_options(backend_config.clone())
+            let table = DeltaTableBuilder::from_uri(delta_table_path)
+                .with_storage_options(backend_config)
                 .load()
                 .await
-            {
-                Ok(table) => Ok(table),
-                // if the table does not exist, create it
-                Err(DeltaTableError::NotATable(e)) => {
-                    warn!("{}", e);
-                    let target_table = CreateBuilder::new()
-                        .with_location(target_table_path)
-                        .with_storage_options(backend_config.clone())
-                        .with_columns(delta_schema.get_fields().clone())
-                        .await
-                        .unwrap();
-                    // write the readed csv into the delta table
-                    DeltaOps::from(target_table)
-                        .write(vec![record_batch.clone()])
-                        .with_save_mode(SaveMode::Overwrite)
-                        .await
-                }
-                // Propagate other errors
-                Err(e) => {
-                    error!("{}", e);
-                    Err(e)
-                }
-            };
+                .unwrap();
 
-            let target_table = target_table.unwrap();
-
-            info!("{:?}", target_table.get_schema());
+            println!("{:?}", table.get_schema());
 
             // STEP 4: Merge Operation
             #[allow(unused)]
-            let (mut table, metrics) = DeltaOps(target_table)
-                .merge(source_table, col("username").eq(col("source.username")))
+            let (mut table, metrics) = DeltaOps(table)
+                .merge(source, col("AccountNumber").eq(col("source.AccountNumber")))
                 .with_source_alias("source")
                 .when_matched_update(|update| {
                     update
-                        .update("account_type", col("source.account_type"))
-                        .update("payment_method", col("source.payment_method"))
-                        .update("credit_card_type", col("source.credit_card_type"))
-                        .update("payment_id", col("source.payment_id"))
+                        .update("AccountNumber", col("source.AccountNumber"))
+                        .update("CreditRating", col("source.CreditRating"))
+                        .update("ActiveFlag", col("source.ActiveFlag"))
                 })
                 .unwrap()
                 .when_not_matched_insert(|insert| {
                     insert
-                        .set("username", col("source.username"))
-                        .set("email", col("source.email"))
-                        .set("account_type", col("source.account_type"))
-                        .set("payment_method", col("source.payment_method"))
-                        .set("credit_card_type", col("source.credit_card_type"))
-                        .set("payment_id", col("source.payment_id"))
+                        .set("VendorID", col("source.VendorID"))
+                        .set("VendorName", col("source.VendorName"))
+                        .set("AccountNumber", col("source.AccountNumber"))
+                        .set("CreditRating", col("source.CreditRating"))
+                        .set("ActiveFlag", col("source.ActiveFlag"))
                 })
                 .unwrap()
                 .await
                 .unwrap();
-
-            info!("Table Version: {:?}", table.version());
-            info!("Number of files: {:?}", table.get_file_uris().count());
-            info!("Number of source rows: {:?}", metrics.num_source_rows);
-            info!("Number of rows insereted in target table: {:?}", metrics.num_target_rows_inserted);
-            info!("Number of rows updated in target table: {:?}", metrics.num_target_rows_updated);
-            info!("Number of rows deleted in target table: {:?}", metrics.num_target_rows_deleted);
-            info!("Number of rows copied in target table: {:?}", metrics.num_target_rows_copied);
-            info!("Number of rows output rows: {:?}", metrics.num_output_rows);
-            info!("Number of rows files added to target table: {:?}", metrics.num_target_files_added);
-            info!("Number of rows files added from target table: {:?}", metrics.num_target_files_removed);
-            info!("Execution time in ms: {:?}", metrics.execution_time_ms);
-            info!("Scan time in ms: {:?}", metrics.scan_time_ms);
-            info!("Rewrite time in ms: {:?}", metrics.rewrite_time_ms);
 
             let response = Response::builder()
                 .status(StatusCode::OK)
@@ -234,10 +208,7 @@ async fn handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
-    std::env::set_var("RUST_LOG", "INFO");
-
     // LEARN: Logging
-    // LEARN: https://docs.rs/env_logger/0.10.0/env_logger/#enabling-logging
     env_logger::init();
 
     let port_key = "FUNCTIONS_CUSTOMHANDLER_PORT";
