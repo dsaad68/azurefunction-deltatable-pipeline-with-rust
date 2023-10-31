@@ -151,8 +151,9 @@ async fn handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
                 // if the table does not exist, create it
                 Err(DeltaTableError::NotATable(e)) => {
                     warn!("{}", e);
-                    create_and_write_table(&record_batch, delta_schema, target_table_path, backend_config).await.unwrap();
+                    let new_table = create_and_write_table(&record_batch, delta_schema, target_table_path, backend_config).await.unwrap();
                     info!("Created Delta Table and wrote the data in it!");
+                    info!("Schema of Delta Table: \n {:#?}", new_table.get_schema());
                     Ok(())
                 }
                 // Propagate other errors
