@@ -15,21 +15,17 @@ use bytes::Buf;
 
 use serde_json::{json, Value};
 
-#[allow(unused_imports)]
+// #[allow(unused_imports)]
 use log::{error, info, warn};
 
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{header, Body, Error, Request, Response, Server, StatusCode};
 
-#[allow(unused_imports)]
-use deltalake::operations::create::CreateBuilder;
-#[allow(unused_imports)]
-use deltalake::operations::DeltaOps;
-#[allow(unused_imports)]
-use deltalake::protocol::SaveMode;
+// use deltalake::operations::create::CreateBuilder;
+// use deltalake::operations::DeltaOps;
+// use deltalake::protocol::SaveMode;
 use deltalake::schema::Schema as DeltaSchema;
-#[allow(unused_imports)]
-use deltalake::DeltaTable;
+// use deltalake::DeltaTable;
 use deltalake::DeltaTableBuilder;
 use deltalake::DeltaTableError;
 
@@ -38,8 +34,8 @@ use deltalake::arrow::datatypes::{
     DataType as ArrowDataType, Field as ArrowField, Schema as ArrowSchema,
 };
 
-#[allow(unused)]
-use deltalake::datafusion::logical_expr::{col, lit};
+// #[allow(unused)]
+// use deltalake::datafusion::logical_expr::{col, lit};
 use deltalake::datafusion::prelude::SessionContext;
 
 use helpers::azure_storage::{fetch_file, get_azure_store};
@@ -87,13 +83,17 @@ async fn handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
 
             // Create a blob_path object
             let blob_path = BlobPath::from_blob_url(&blob_event.blob_url).unwrap();
-            info!("{:?}", &blob_path);
+            info!("--- Blob Path: {:?}", &blob_path);
 
-            // Create an azure store object
-            let azure_store = get_azure_store("samples-workitems");
+            // Create an azure store object for specific container
+            let azure_store = get_azure_store("data");
+
+            info!("--- Getting File from Azure Storage [ ]");
 
             // Fetch the file from azure storage
             let fetched = fetch_file(azure_store.clone(), blob_path).await;
+
+            info!("--- Getting File from Azure Storage [X]");
 
             let schema = ArrowSchema::new(vec![
                 ArrowField::new("username", ArrowDataType::Utf8, false),
@@ -125,7 +125,7 @@ async fn handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
             let ctx = SessionContext::new();
             let source_table = ctx.read_batch(record_batch.clone()).unwrap();
 
-            info!("{:?}", source_table.schema());
+            info!("--- Table Schema {:?}", source_table.schema());
 
             // STEP 2: get the need variable and create backend config
             let azure_storage_access_key = std::env::var("AZURE_STORAGE_ACCOUNT_KEY").unwrap();
@@ -136,7 +136,7 @@ async fn handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
             );
 
             let target_table_path =
-                "abfs://samples-workitems@ds0learning0adls.dfs.core.windows.net/userslist/";
+                "abfs://data@ds0learning0adls.dfs.core.windows.net/userslist/";
 
             // STEP 3: get the table source, if it doesn't exist create it
             let _ = match DeltaTableBuilder::from_uri(target_table_path)
@@ -150,10 +150,10 @@ async fn handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
                 },
                 // if the table does not exist, create it
                 Err(DeltaTableError::NotATable(e)) => {
-                    warn!("{}", e);
+                    warn!("-!!!- Warning: Table does not exist! {}", e);
                     let new_table = create_and_write_table(&record_batch, delta_schema, target_table_path, backend_config).await.unwrap();
-                    info!("Created Delta Table and wrote the data in it!");
-                    info!("Schema of Delta Table: \n {:#?}", new_table.get_schema());
+                    info!("--- Created Delta Table and wrote the data in it!");
+                    info!("--- Schema of Delta Table: \n {:#?}", new_table.get_schema());
                     Ok(())
                 }
                 // Propagate other errors

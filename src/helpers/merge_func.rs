@@ -16,22 +16,23 @@ pub async fn user_list_merge(target_table: DeltaTable, source_df: DataFrame) {
     let (table, metrics) = DeltaOps(target_table)
                 .merge(source_df, col("username").eq(col("source.username")))
                 .with_source_alias("source")
+                .with_target_alias("target")
                 .when_matched_update(|update| {
                     update
-                        .update("account_type", col("source.account_type"))
-                        .update("payment_method", col("source.payment_method"))
-                        .update("credit_card_type", col("source.credit_card_type"))
-                        .update("payment_id", col("source.payment_id"))
+                        .update("target.account_type", col("source.account_type"))
+                        .update("target.payment_method", col("source.payment_method"))
+                        .update("target.credit_card_type", col("source.credit_card_type"))
+                        .update("target.payment_id", col("source.payment_id"))
                 })
                 .unwrap()
                 .when_not_matched_insert(|insert| {
                     insert
-                        .set("username", col("source.username"))
-                        .set("email", col("source.email"))
-                        .set("account_type", col("source.account_type"))
-                        .set("payment_method", col("source.payment_method"))
-                        .set("credit_card_type", col("source.credit_card_type"))
-                        .set("payment_id", col("source.payment_id"))
+                        .set("target.username", col("source.username"))
+                        .set("target.email", col("source.email"))
+                        .set("target.account_type", col("source.account_type"))
+                        .set("target.payment_method", col("source.payment_method"))
+                        .set("target.credit_card_type", col("source.credit_card_type"))
+                        .set("target.payment_id", col("source.payment_id"))
                 })
                 .unwrap()
                 .await

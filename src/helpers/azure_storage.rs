@@ -20,7 +20,7 @@ pub fn get_azure_store(container_name: &str) -> Arc<dyn ObjectStore> {
 
 #[allow(unused)]
 pub async fn fetch_file(azure_store: Arc<dyn ObjectStore>, blob_path: BlobPath) -> Bytes {
-    let path: Path = blob_path.complete_path.try_into().unwrap();
+    let path: Path = blob_path.complete_path.into();
 
     azure_store.get(&path).await.unwrap().bytes().await.unwrap()
 }
