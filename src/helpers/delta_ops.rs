@@ -1,18 +1,19 @@
-use object_store::azure::MicrosoftAzureBuilder;
-use std::collections::HashMap;
-use std::sync::Arc;
 use url::Url;
+use std::sync::Arc;
+use std::collections::HashMap;
+use object_store::azure::MicrosoftAzureBuilder;
 
+use deltalake::DeltaTable;
+use deltalake::DeltaTableError;
+use deltalake::DeltaTableBuilder;
+use deltalake::protocol::SaveMode;
+use deltalake::operations::DeltaOps;
+use deltalake::storage::DeltaObjectStore;
+use deltalake::schema::Schema as DeltaSchema;
 use deltalake::arrow::record_batch::RecordBatch;
 use deltalake::operations::create::CreateBuilder;
-use deltalake::operations::DeltaOps;
-use deltalake::protocol::SaveMode;
-use deltalake::schema::Schema as DeltaSchema;
-use deltalake::storage::DeltaObjectStore;
-use deltalake::DeltaTable;
-use deltalake::DeltaTableBuilder;
-use deltalake::DeltaTableError;
 
+// CHECK: Unused
 #[allow(unused)]
 pub fn get_delta_store(container_name: &str, output_url: &str) -> Arc<DeltaObjectStore> {
     let azure_store = MicrosoftAzureBuilder::from_env()
@@ -29,7 +30,6 @@ pub fn get_delta_store(container_name: &str, output_url: &str) -> Arc<DeltaObjec
     Arc::new(DeltaObjectStore::new(azure_store, output_url))
 }
 
-#[allow(unused)]
 pub async fn create_and_write_table(
     record_batch: &RecordBatch,
     delta_schema: DeltaSchema,
@@ -50,6 +50,7 @@ pub async fn create_and_write_table(
     // TODO: Print Table Schema
 }
 
+// CHECK: Unused
 #[allow(unused)]
 pub async fn try_get_delta_table(
     target_table_path: &str,

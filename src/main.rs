@@ -15,17 +15,13 @@ use bytes::Buf;
 
 use serde_json::{json, Value};
 
-// #[allow(unused_imports)]
 use log::{error, info, warn};
 
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{header, Body, Error, Request, Response, Server, StatusCode};
 
-// use deltalake::operations::create::CreateBuilder;
-// use deltalake::operations::DeltaOps;
-// use deltalake::protocol::SaveMode;
+
 use deltalake::schema::Schema as DeltaSchema;
-// use deltalake::DeltaTable;
 use deltalake::DeltaTableBuilder;
 use deltalake::DeltaTableError;
 
@@ -34,8 +30,6 @@ use deltalake::arrow::datatypes::{
     DataType as ArrowDataType, Field as ArrowField, Schema as ArrowSchema,
 };
 
-// #[allow(unused)]
-// use deltalake::datafusion::logical_expr::{col, lit};
 use deltalake::datafusion::prelude::SessionContext;
 
 use helpers::azure_storage::{fetch_file, get_azure_store};

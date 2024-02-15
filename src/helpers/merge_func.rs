@@ -1,16 +1,13 @@
-
-
 use log::info;
 
 use deltalake::DeltaTable;
 #[allow(unused_imports)]
 use deltalake::DeltaTableError;
 use deltalake::operations::DeltaOps;
+use deltalake::datafusion::logical_expr::col;
 use deltalake::datafusion::dataframe::DataFrame;
 
-use deltalake::datafusion::logical_expr::col;
 
-#[allow(unused)]
 pub async fn user_list_merge(target_table: DeltaTable, source_df: DataFrame) {
 
     let (table, metrics) = DeltaOps(target_table)
