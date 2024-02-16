@@ -1,42 +1,39 @@
 // LEARN: unwrap_or_default
 // LEARN: #[cfg(feature = "datafusion")]
 
-// TODO 1: improve the errors
-// TODO 2: read the csv with datafusion context
+// TODO: improve the errors
+// IDEA: read the csv with datafusion context
 
 mod helpers;
 
-use std::collections::HashMap;
-use std::convert::Infallible;
 use std::env;
 use std::sync::Arc;
+use std::collections::HashMap;
+use std::convert::Infallible;
 
 use bytes::Buf;
-
-use serde_json::{json, Value};
-
 use log::{error, info, warn};
+use serde_json::{json, Value};
 
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{header, Body, Error, Request, Response, Server, StatusCode};
 
-
-use deltalake::schema::Schema as DeltaSchema;
-use deltalake::DeltaTableBuilder;
 use deltalake::DeltaTableError;
-
+use deltalake::DeltaTableBuilder;
 use deltalake::arrow::csv::ReaderBuilder;
+use deltalake::schema::Schema as DeltaSchema;
+use deltalake::datafusion::prelude::SessionContext;
 use deltalake::arrow::datatypes::{
-    DataType as ArrowDataType, Field as ArrowField, Schema as ArrowSchema,
+    Field as ArrowField,
+    Schema as ArrowSchema,
+    DataType as ArrowDataType,
 };
 
-use deltalake::datafusion::prelude::SessionContext;
-
-use helpers::azure_storage::{fetch_file, get_azure_store};
-use helpers::blob_event::{BlobEvent, Root};
 use helpers::blob_path::BlobPath;
 use helpers::merge_func::user_list_merge;
+use helpers::blob_event::{BlobEvent, Root};
 use helpers::delta_ops::create_and_write_table;
+use helpers::azure_storage::{fetch_file, get_azure_store};
 
 async fn handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
     info!("Rust HTTP trigger function begun");
@@ -68,7 +65,11 @@ async fn handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
     let json_request: Result<Value, serde_json::Error> = serde_json::from_slice(&body_bytes);
 
     match json_request {
+
+        // If the JSON request is valid
         Ok(json_request) => {
+
+            // Deserialize the JSON request
             let deserialized_data: Root = serde_json::from_str(&json_request.to_string()).unwrap();
 
             // Convert the Root instance to a BlobEvent instance
@@ -82,13 +83,10 @@ async fn handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
             // Create an azure store object for specific container
             let azure_store = get_azure_store("data");
 
-            info!("--- Getting File from Azure Storage [ ]");
-
             // Fetch the file from azure storage
             let fetched = fetch_file(azure_store.clone(), blob_path).await;
 
-            info!("--- Getting File from Azure Storage [X]");
-
+            // Define the Arrow schema for reading the CSV
             let schema = ArrowSchema::new(vec![
                 ArrowField::new("username", ArrowDataType::Utf8, false),
                 ArrowField::new("email", ArrowDataType::Utf8, false),
@@ -100,17 +98,16 @@ async fn handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
 
             let schema = Arc::new(schema);
 
+            // Create a DeltaTable schema
             let delta_schema = schema.clone();
             let delta_schema = DeltaSchema::try_from(delta_schema).unwrap();
-            //let partition_columns = vec!["VendorName".to_string()];
-
-            let reader = fetched.reader();
 
             // Create a csv reader
+            let reader = fetched.reader();
             let mut csv = ReaderBuilder::new(schema)
-                .has_header(true)
-                .build(reader)
-                .unwrap();
+                                        .has_header(true)
+                                        .build(reader)
+                                        .unwrap();
 
             // Create a RecordBatch Object from CSV
             let record_batch = csv.next().unwrap().unwrap();
@@ -121,7 +118,7 @@ async fn handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
 
             info!("--- Table Schema {:?}", source_table.schema());
 
-            // STEP 2: get the need variable and create backend config
+            // STEP 2: Get the need env variable and create backend config for object store in ADLS
             let azure_storage_access_key = std::env::var("AZURE_STORAGE_ACCOUNT_KEY").unwrap();
             let mut backend_config: HashMap<String, String> = HashMap::new();
             backend_config.insert(
@@ -129,8 +126,10 @@ async fn handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
                 azure_storage_access_key,
             );
 
-            let target_table_path =
-                "abfs://data@ds0learning0adls.dfs.core.windows.net/userslist/";
+            let target_table_path = "abfs://data@ds0learning0adls.dfs.core.windows.net/userslist/";
+
+            // TODO: Add partitioning later
+            //let partition_columns = vec!["account_type".to_string()];
 
             // STEP 3: get the table source, if it doesn't exist create it
             let _ = match DeltaTableBuilder::from_uri(target_table_path)
@@ -138,10 +137,12 @@ async fn handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
                 .load()
                 .await
             {
+                // if the table exists, merge the data in it
                 Ok(table) => {
                     user_list_merge(table, source_table).await;
                     Ok(())
                 },
+
                 // if the table does not exist, create it
                 Err(DeltaTableError::NotATable(e)) => {
                     warn!("-!!!- Warning: Table does not exist! {}", e);
@@ -157,6 +158,7 @@ async fn handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
                 }
             };
 
+            // Return an appropriate response.
             let response = Response::builder()
                 .status(StatusCode::OK)
                 .header(header::CONTENT_TYPE, "application/json")
@@ -185,6 +187,8 @@ async fn handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
+
+    // Set the RUST_LOG env variable to "INFO" to see the logs
     std::env::set_var("RUST_LOG", "INFO");
 
     // LEARN: Logging
