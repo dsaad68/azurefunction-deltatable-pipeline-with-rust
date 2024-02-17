@@ -8,15 +8,24 @@ mod helpers;
 
 use std::env;
 use std::sync::Arc;
+use std::net::SocketAddr;
 use std::collections::HashMap;
 use std::convert::Infallible;
 
 use bytes::Buf;
+use serde_json::Value;
 use log::{error, info, warn};
-use serde_json::{json, Value};
 
-use hyper::service::{make_service_fn, service_fn};
-use hyper::{header, Body, Error, Request, Response, Server, StatusCode};
+use hyper::body::Bytes;
+use hyper_util::rt::TokioIo;
+use hyper::server::conn::http1;
+use hyper::service::service_fn;
+use hyper::{header, Error, Request, Response, StatusCode};
+
+// this is helper for hyper
+use http_body_util::{Full, BodyExt};
+
+use tokio::net::TcpListener;
 
 use deltalake::DeltaTableError;
 use deltalake::DeltaTableBuilder;
@@ -35,30 +44,35 @@ use helpers::blob_event::{BlobEvent, Root};
 use helpers::delta_ops::create_and_write_table;
 use helpers::azure_storage::{fetch_file, get_azure_store};
 
-async fn handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
+async fn handler(req: Request<hyper::body::Incoming>) -> Result<Response<Full<Bytes>>, Infallible> {
     info!("Rust HTTP trigger function begun");
 
+    // Collect the body into bytes
+    let whole_body = req.collect().await;
+
     // Read the request body as bytes.
-    let body_bytes = match hyper::body::to_bytes(req.into_body()).await {
-        Ok(bytes) => bytes,
+    let body_bytes = match whole_body {
+        Ok(body) => body.to_bytes(),
         Err(_) => {
-            return Ok(Response::builder()
-                .status(StatusCode::BAD_REQUEST)
-                .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from("Error reading request body"))
-                .unwrap())
-        }
-    };
+            return Ok(
+                Response::builder()
+                    .status(StatusCode::BAD_REQUEST)
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Full::new(Bytes::from("{\"body\": \"Error reading request body\"}")))
+                    .unwrap()
+                )
+            }
+        };
 
     // Check if the Body is Empty
     if body_bytes.is_empty() {
-        return Ok(Response::builder()
+        return Ok(
+            Response::builder()
             .status(StatusCode::NO_CONTENT)
             .header(header::CONTENT_TYPE, "application/json")
-            .body(Body::from(
-                "{ 'body' : 'No Content Success Status Response Code!'}",
-            ))
-            .unwrap());
+            .body(Full::new(Bytes::from("{\"body\": \"No Content Success Status Response was sent!\"}")))
+            .unwrap()
+        )
     }
 
     // Parse the JSON request.
@@ -162,7 +176,7 @@ async fn handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
             let response = Response::builder()
                 .status(StatusCode::OK)
                 .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from("{ 'body' :'Request body printed!'}"))
+                .body(Full::new(Bytes::from("{\"body\": \"Success Status Response Code!\"}")))
                 .unwrap();
             Ok(response)
         }
@@ -173,12 +187,9 @@ async fn handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
             let response = Response::builder()
                 .status(StatusCode::BAD_REQUEST)
                 .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(
-                    serde_json::to_string(
-                        &json!({ "Body": format!("Error parsing JSON: {:?}", err) }),
-                    )
-                    .unwrap(),
-                ))
+                .body(Full::new(Bytes::from(
+                    format!("{{\"body\": \"Error parsing JSON: {:?}\"}}", err)
+                )))
                 .unwrap();
             Ok(response)
         }
@@ -187,6 +198,7 @@ async fn handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
+    info!("Rust Function Starts!");
 
     // Set the RUST_LOG env variable to "INFO" to see the logs
     std::env::set_var("RUST_LOG", "INFO");
@@ -195,18 +207,37 @@ async fn main() -> Result<(), Error> {
     // LEARN: https://docs.rs/env_logger/0.10.0/env_logger/#enabling-logging
     env_logger::init();
 
+    // Get port from env variable and set to 3000 if not set
     let port_key = "FUNCTIONS_CUSTOMHANDLER_PORT";
     let port: u16 = match env::var(port_key) {
         Ok(val) => val.parse().expect("Custom Handler port is not a number!"),
         Err(_) => 3000,
     };
-    let addr = ([127, 0, 0, 1], port).into();
+    info!("Port: {}", port);
+    let addr = SocketAddr::from(([127, 0, 0, 1], port));
 
-    let server = Server::bind(&addr).serve(make_service_fn(|_| async move {
-        Ok::<_, Infallible>(service_fn(handler))
-    }));
+    // We create a TcpListener and bind it to 127.0.0.1:port
+    let listener = TcpListener::bind(addr).await.unwrap();
 
     info!("Listening on http://{}", addr);
+    // We start a loop to continuously accept incoming connections
+    loop {
+        let (stream, _) = listener.accept().await.unwrap();
 
-    server.await
+        // Use an adapter to access something implementing `tokio::io` traits as if they implement
+        // `hyper::rt` IO traits.
+        let io = TokioIo::new(stream);
+
+        // Spawn a tokio task to serve multiple connections concurrently
+        tokio::task::spawn(async move {
+            // Finally, we bind the incoming connection to our `hello` service
+            if let Err(err) = http1::Builder::new()
+                // `service_fn` converts our function in a `Service`
+                .serve_connection(io, service_fn(handler))
+                .await
+            {
+                println!("Error serving connection: {:?}", err);
+            }
+        });
+    }
 }

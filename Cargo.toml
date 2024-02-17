@@ -15,9 +15,12 @@ futures ="0.3.28"
 chrono-tz = "0.8.3"
 env_logger = "0.10.0"
 serde_json = { version = "1.0.107" }
+tokio = { version = "1.33.0", features = ["full"] }
+hyper = { version = "1.1.0", features = ["full"] }
 chrono = { version = "0.4.31", features = ["serde"]  }
 serde = { version = "1.0.189", features = ["derive"] }
-hyper = { version = "0.14.27", features = ["full"] }
-tokio = { version = "1.33.0", features = ["full"] }
 object_store = {version = "0.7.1", features = ["azure"] }
 deltalake = { version="0.16.2", features = ["azure", "parquet", "datafusion"]  }
+
+http-body-util = "0.1"
+hyper-util = { version = "0.1", features = ["full"] }
