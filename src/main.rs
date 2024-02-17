@@ -126,13 +126,13 @@ async fn handler(req: Request<hyper::body::Incoming>) -> Result<Response<Full<By
             // Create a RecordBatch Object from CSV
             let record_batch = csv.next().unwrap().unwrap();
 
-            // STEP 1: Creating a Datafusion Dataframe from a record batch
+            // Creating a Datafusion Dataframe from a record batch
             let ctx = SessionContext::new();
             let source_table = ctx.read_batch(record_batch.clone()).unwrap();
 
             info!("--- Table Schema {:?}", source_table.schema());
 
-            // STEP 2: Get the need env variable and create backend config for object store in ADLS
+            // Get the need env variable and create backend config for object store in ADLS
             let azure_storage_access_key = std::env::var("AZURE_STORAGE_ACCOUNT_KEY").unwrap();
             let mut backend_config: HashMap<String, String> = HashMap::new();
             backend_config.insert(
@@ -145,7 +145,7 @@ async fn handler(req: Request<hyper::body::Incoming>) -> Result<Response<Full<By
             // TODO: Add partitioning later
             //let partition_columns = vec!["account_type".to_string()];
 
-            // STEP 3: get the table source, if it doesn't exist create it
+            // Get the table source, if it doesn't exist create it
             let _ = match DeltaTableBuilder::from_uri(target_table_path)
                 .with_storage_options(backend_config.clone())
                 .load()
