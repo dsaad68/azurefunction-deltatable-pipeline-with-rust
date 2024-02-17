@@ -1,9 +1,14 @@
 {
-  "bindings": [
-    {
-      "type": "eventGridTrigger",
-      "name": "eventGridEvent",
-      "direction": "in"
+    "bindings": [
+        {
+            "type": "eventGridTrigger",
+            "name": "eventGridEvent",
+            "direction": "in"
+        }
+    ],
+    "retry": {
+        "strategy": "fixedDelay",
+        "maxRetryCount": 1,
+        "delayInterval": "00:00:10"
     }
-  ]
 }

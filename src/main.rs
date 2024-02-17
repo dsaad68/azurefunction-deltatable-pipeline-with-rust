@@ -1,36 +1,42 @@
+// LEARN: unwrap_or_default
+// LEARN: #[cfg(feature = "datafusion")]
+
+// TODO: improve the errors
+// IDEA: read the csv with datafusion context
+
 mod helpers;
 
 use std::env;
 use std::sync::Arc;
+use std::collections::HashMap;
 use std::convert::Infallible;
 
 use bytes::Buf;
-
-use serde_json::{Value, json};
-
-#[allow(unused_imports)]
-use log::{ info, error, debug, warn };
+use log::{error, info, warn};
+use serde_json::{json, Value};
 
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{header, Body, Error, Request, Response, Server, StatusCode};
 
+use deltalake::DeltaTableError;
+use deltalake::DeltaTableBuilder;
 use deltalake::arrow::csv::ReaderBuilder;
-use deltalake::operations::writer::{DeltaWriter, WriterConfig};
-use deltalake::arrow::datatypes::{DataType as ArrowDataType, Field as ArrowField, Schema as ArrowSchema};
-use deltalake::parquet::{
-    basic::{Compression, Encoding},
-    file::properties::*,
+use deltalake::schema::Schema as DeltaSchema;
+use deltalake::datafusion::prelude::SessionContext;
+use deltalake::arrow::datatypes::{
+    Field as ArrowField,
+    Schema as ArrowSchema,
+    DataType as ArrowDataType,
 };
 
 use helpers::blob_path::BlobPath;
-use helpers::delta_ops::get_delta_store;
-use helpers::blob_event::{BlobEvent,Root};
-use helpers::azure_storage::{get_azure_store, fetch_file};
-
+use helpers::merge_func::user_list_merge;
+use helpers::blob_event::{BlobEvent, Root};
+use helpers::delta_ops::create_and_write_table;
+use helpers::azure_storage::{fetch_file, get_azure_store};
 
 async fn handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
-
-    println!("Rust HTTP trigger function begun");
+    info!("Rust HTTP trigger function begun");
 
     // Read the request body as bytes.
     let body_bytes = match hyper::body::to_bytes(req.into_body()).await {
@@ -49,7 +55,9 @@ async fn handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
         return Ok(Response::builder()
             .status(StatusCode::NO_CONTENT)
             .header(header::CONTENT_TYPE, "application/json")
-            .body(Body::from("{ 'body' : 'No Content Success Status Response Code!'}"))
+            .body(Body::from(
+                "{ 'body' : 'No Content Success Status Response Code!'}",
+            ))
             .unwrap());
     }
 
@@ -57,8 +65,11 @@ async fn handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
     let json_request: Result<Value, serde_json::Error> = serde_json::from_slice(&body_bytes);
 
     match json_request {
+
+        // If the JSON request is valid
         Ok(json_request) => {
 
+            // Deserialize the JSON request
             let deserialized_data: Root = serde_json::from_str(&json_request.to_string()).unwrap();
 
             // Convert the Root instance to a BlobEvent instance
@@ -66,56 +77,88 @@ async fn handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
             info!("{:?}", blob_event);
 
             // Create a blob_path object
-            let blob_path = BlobPath::from_blob_url(& blob_event.blob_url).unwrap();
-            info!("{:?}", & blob_path);
+            let blob_path = BlobPath::from_blob_url(&blob_event.blob_url).unwrap();
+            info!("--- Blob Path: {:?}", &blob_path);
 
-            // Create an azure store object
-            let azure_store = get_azure_store("samples-workitems");
+            // Create an azure store object for specific container
+            let azure_store = get_azure_store("data");
 
             // Fetch the file from azure storage
             let fetched = fetch_file(azure_store.clone(), blob_path).await;
 
+            // Define the Arrow schema for reading the CSV
             let schema = ArrowSchema::new(vec![
-                ArrowField::new("VendorID", ArrowDataType::Int32, false),
-                ArrowField::new("VendorName", ArrowDataType::Utf8, false),
-                ArrowField::new("AccountNumber", ArrowDataType::Utf8, false),
-                ArrowField::new("CreditRating", ArrowDataType::Int32, false),
-                ArrowField::new("ActiveFlag", ArrowDataType::Int32, false),
+                ArrowField::new("username", ArrowDataType::Utf8, false),
+                ArrowField::new("email", ArrowDataType::Utf8, false),
+                ArrowField::new("account_type", ArrowDataType::Utf8, false),
+                ArrowField::new("payment_method", ArrowDataType::Utf8, true),
+                ArrowField::new("credit_card_type", ArrowDataType::Utf8, true),
+                ArrowField::new("payment_id", ArrowDataType::Utf8, true),
             ]);
 
             let schema = Arc::new(schema);
-            let table_schema = schema.clone();
-            
-            let reader = fetched.reader();
-            
+
+            // Create a DeltaTable schema
+            let delta_schema = schema.clone();
+            let delta_schema = DeltaSchema::try_from(delta_schema).unwrap();
+
             // Create a csv reader
-            let mut csv = ReaderBuilder::new(schema).has_header(true).build(reader).unwrap();
-            
+            let reader = fetched.reader();
+            let mut csv = ReaderBuilder::new(schema)
+                                        .has_header(true)
+                                        .build(reader)
+                                        .unwrap();
+
             // Create a RecordBatch Object from CSV
             let record_batch = csv.next().unwrap().unwrap();
-            
-            // Use properties builder to set certain options and assemble the configuration.
-            let writer_prop: Option<WriterProperties> = WriterProperties::builder()
-                .set_writer_version(WriterVersion::PARQUET_2_0)
-                .set_encoding(Encoding::PLAIN)
-                .set_compression(Compression::SNAPPY)
-                .build()
-                .try_into()
-                .unwrap();
-            
-            let output_path = "https://ds0learning0adls.blob.core.windows.net";
-            let delta_store = get_delta_store("samples-workitems/vendors", output_path);
 
-            let partition_columns = vec!["VendorName".to_string()];
+            // STEP 1: Creating a Datafusion Dataframe from a record batch
+            let ctx = SessionContext::new();
+            let source_table = ctx.read_batch(record_batch.clone()).unwrap();
 
-            // TODO: Add append option; deltalake::operations::merge
-            // INFO: target_file_size, write_batch_size default values are defined in deltalake::operations::writer
-            let delta_config = WriterConfig::new(table_schema, partition_columns, writer_prop, None, None);
-            let mut delta_writer = DeltaWriter::new(delta_store, delta_config);
+            info!("--- Table Schema {:?}", source_table.schema());
 
-            delta_writer.write(&record_batch).await.unwrap();
-            delta_writer.close().await.unwrap();
+            // STEP 2: Get the need env variable and create backend config for object store in ADLS
+            let azure_storage_access_key = std::env::var("AZURE_STORAGE_ACCOUNT_KEY").unwrap();
+            let mut backend_config: HashMap<String, String> = HashMap::new();
+            backend_config.insert(
+                "azure_storage_access_key".to_string(),
+                azure_storage_access_key,
+            );
 
+            let target_table_path = "abfs://data@ds0learning0adls.dfs.core.windows.net/userslist/";
+
+            // TODO: Add partitioning later
+            //let partition_columns = vec!["account_type".to_string()];
+
+            // STEP 3: get the table source, if it doesn't exist create it
+            let _ = match DeltaTableBuilder::from_uri(target_table_path)
+                .with_storage_options(backend_config.clone())
+                .load()
+                .await
+            {
+                // if the table exists, merge the data in it
+                Ok(table) => {
+                    user_list_merge(table, source_table).await;
+                    Ok(())
+                },
+
+                // if the table does not exist, create it
+                Err(DeltaTableError::NotATable(e)) => {
+                    warn!("-!!!- Warning: Table does not exist! {}", e);
+                    let new_table = create_and_write_table(&record_batch, delta_schema, target_table_path, backend_config).await.unwrap();
+                    info!("--- Created Delta Table and wrote the data in it!");
+                    info!("--- Schema of Delta Table: \n {:#?}", new_table.get_schema());
+                    Ok(())
+                }
+                // Propagate other errors
+                Err(e) => {
+                    error!("{}", e);
+                    Err(e)
+                }
+            };
+
+            // Return an appropriate response.
             let response = Response::builder()
                 .status(StatusCode::OK)
                 .header(header::CONTENT_TYPE, "application/json")
@@ -130,7 +173,12 @@ async fn handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
             let response = Response::builder()
                 .status(StatusCode::BAD_REQUEST)
                 .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(serde_json::to_string(&json!({ "Body": format!("Error parsing JSON: {:?}", err) })).unwrap()))
+                .body(Body::from(
+                    serde_json::to_string(
+                        &json!({ "Body": format!("Error parsing JSON: {:?}", err) }),
+                    )
+                    .unwrap(),
+                ))
                 .unwrap();
             Ok(response)
         }
@@ -140,6 +188,11 @@ async fn handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
 #[tokio::main]
 async fn main() -> Result<(), Error> {
 
+    // Set the RUST_LOG env variable to "INFO" to see the logs
+    std::env::set_var("RUST_LOG", "INFO");
+
+    // LEARN: Logging
+    // LEARN: https://docs.rs/env_logger/0.10.0/env_logger/#enabling-logging
     env_logger::init();
 
     let port_key = "FUNCTIONS_CUSTOMHANDLER_PORT";
@@ -156,5 +209,4 @@ async fn main() -> Result<(), Error> {
     info!("Listening on http://{}", addr);
 
     server.await
-
 }

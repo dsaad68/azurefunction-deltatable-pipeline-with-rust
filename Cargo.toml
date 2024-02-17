@@ -2,6 +2,7 @@
 name = "blobhandler"
 version = "0.1.0"
 edition = "2021"
+authors = ["Daniel Saad <me@dsaad.com>"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -9,16 +10,14 @@ edition = "2021"
 url = "2.4.1"
 log = "0.4.20"
 bytes = "1.5.0"
-parquet ="47.0.0"
+parquet ="48.0.0"
 futures ="0.3.28"
-env_logger = "0.10.0"
 chrono-tz = "0.8.3"
+env_logger = "0.10.0"
 serde_json = { version = "1.0.107" }
 chrono = { version = "0.4.31", features = ["serde"]  }
 serde = { version = "1.0.189", features = ["derive"] }
 hyper = { version = "0.14.27", features = ["full"] }
 tokio = { version = "1.33.0", features = ["full"] }
 object_store = {version = "0.7.1", features = ["azure"] }
-deltalake = { version="0.16.2", features = ["azure", "parquet"]  }
-# arrow = {version = "47.0.0", features = ["csv"]}
-# polars = { git = "https://github.com/pola-rs/polars", features = ["describe", "lazy", "ndarray", "object", "dtype-struct", "concat_str", "mode"] }
+deltalake = { version="0.16.2", features = ["azure", "parquet", "datafusion"]  }

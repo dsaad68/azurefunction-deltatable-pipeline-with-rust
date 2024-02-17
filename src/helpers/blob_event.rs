@@ -9,11 +9,11 @@ struct EventData {
     api: String,
     #[serde(rename = "contentType")]
     content_type: String,
-    #[serde(rename = "contentLength")] 
+    #[serde(rename = "contentLength")]
     content_length: i64,
-    #[serde(rename = "blobType")] 
+    #[serde(rename = "blobType")]
     blob_type: String,
-    #[serde(rename = "blobUrl")] 
+    #[serde(rename = "blobUrl")]
     blob_url: String,
     url: String,
 }
@@ -21,20 +21,20 @@ struct EventData {
 #[derive(Serialize, Deserialize, Debug)]
 struct EventGridEvent {
     data: EventData,
-    #[serde(rename = "eventTime")] 
+    #[serde(rename = "eventTime")]
     event_time: String,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 struct Data {
-    #[serde(rename = "eventGridEvent")] 
+    #[serde(rename = "eventGridEvent")]
     event_grid_event: EventGridEvent,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Root {
     #[serde(rename = "Data")]
-    data: Data
+    data: Data,
 }
 
 #[derive(Debug)]
@@ -46,20 +46,19 @@ pub struct BlobEvent {
     pub blob_url: String,
     pub blob_size_mb: f64,
     pub url: String,
-    pub event_time: NaiveDateTime
-    
+    pub event_time: NaiveDateTime,
 }
-
 
 impl From<Root> for BlobEvent {
     fn from(root: Root) -> Self {
         let event_data = root.data.event_grid_event.data;
-        let blob_size_mb = event_data.content_length as f64 / 1_048_576f64 ;
-        let event_time = DateTime::parse_from_rfc3339(root.data.event_grid_event.event_time.as_str())
-        .unwrap()
-        .with_timezone(&Berlin)
-        .naive_local();
-        
+        let blob_size_mb = event_data.content_length as f64 / 1_048_576f64;
+        let event_time =
+            DateTime::parse_from_rfc3339(root.data.event_grid_event.event_time.as_str())
+                .unwrap()
+                .with_timezone(&Berlin)
+                .naive_local();
+
         BlobEvent {
             api: event_data.api,
             content_type: event_data.content_type,
@@ -68,7 +67,7 @@ impl From<Root> for BlobEvent {
             blob_url: event_data.blob_url,
             blob_size_mb,
             url: event_data.url,
-            event_time
+            event_time,
         }
     }
 }
