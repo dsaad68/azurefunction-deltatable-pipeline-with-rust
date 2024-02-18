@@ -1,9 +1,3 @@
-// LEARN: unwrap_or_default
-// LEARN: #[cfg(feature = "datafusion")]
-
-// TODO: improve the errors
-// IDEA: read the csv with datafusion context
-
 mod helpers;
 
 use std::env;
@@ -12,6 +6,7 @@ use std::net::SocketAddr;
 use std::collections::HashMap;
 use std::convert::Infallible;
 
+use url::Url;
 use bytes::Buf;
 use serde_json::Value;
 use log::{error, info, warn};
@@ -30,7 +25,7 @@ use tokio::net::TcpListener;
 use deltalake::DeltaTableError;
 use deltalake::DeltaTableBuilder;
 use deltalake::arrow::csv::ReaderBuilder;
-use deltalake::schema::Schema as DeltaSchema;
+use deltalake::kernel::Schema as DeltaSchema;
 use deltalake::datafusion::prelude::SessionContext;
 use deltalake::arrow::datatypes::{
     Field as ArrowField,
@@ -119,7 +114,7 @@ async fn handler(req: Request<hyper::body::Incoming>) -> Result<Response<Full<By
             // Create a csv reader
             let reader = fetched.reader();
             let mut csv = ReaderBuilder::new(schema)
-                                        .has_header(true)
+                                        .with_header(true)
                                         .build(reader)
                                         .unwrap();
 
@@ -140,10 +135,13 @@ async fn handler(req: Request<hyper::body::Incoming>) -> Result<Response<Full<By
                 azure_storage_access_key,
             );
 
-            let target_table_path = "abfs://data@ds0learning0adls.dfs.core.windows.net/userslist/";
-
             // TODO: Add partitioning later
             //let partition_columns = vec!["account_type".to_string()];
+
+            // Note: From Deltalake version 0.17.0 we can call the storage crate via: deltalake::azure::register_handlers(None); at the entrypoint for their code.
+            let target_table_path = "abfs://data@ds0learning0adls.dfs.core.windows.net/userslist/";
+            let _additional_prefixes = Some(Url::parse("abfs://data@ds0learning0adls.dfs.core.windows.net").unwrap());
+            deltalake::azure::register_handlers(_additional_prefixes);
 
             // Get the table source, if it doesn't exist create it
             let _ = match DeltaTableBuilder::from_uri(target_table_path)
@@ -203,8 +201,6 @@ async fn main() -> Result<(), Error> {
     // Set the RUST_LOG env variable to "INFO" to see the logs
     std::env::set_var("RUST_LOG", "INFO");
 
-    // LEARN: Logging
-    // LEARN: https://docs.rs/env_logger/0.10.0/env_logger/#enabling-logging
     env_logger::init();
 
     // Get port from env variable and set to 3000 if not set

@@ -1,5 +1,5 @@
-use std::error::Error;
 use url::Url;
+use std::error::Error;
 
 #[derive(Debug)]
 pub struct BlobPath {

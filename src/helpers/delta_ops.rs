@@ -5,7 +5,7 @@ use deltalake::DeltaTableError;
 use deltalake::DeltaTableBuilder;
 use deltalake::protocol::SaveMode;
 use deltalake::operations::DeltaOps;
-use deltalake::schema::Schema as DeltaSchema;
+use deltalake::kernel::Schema as DeltaSchema;
 use deltalake::arrow::record_batch::RecordBatch;
 use deltalake::operations::create::CreateBuilder;
 
@@ -18,7 +18,7 @@ pub async fn create_and_write_table(
     let new_table = CreateBuilder::new()
         .with_location(target_table_path)
         .with_storage_options(backend_config.clone())
-        .with_columns(delta_schema.get_fields().clone())
+        .with_columns(delta_schema.fields().clone())
         .await?;
 
     DeltaOps::from(new_table)
@@ -47,7 +47,7 @@ pub async fn try_get_delta_table(
             CreateBuilder::new()
                 .with_location(target_table_path)
                 .with_storage_options(backend_config.clone())
-                .with_columns(delta_schema.get_fields().clone())
+                .with_columns(delta_schema.fields().clone())
                 .await
         }
         Err(e) => {
