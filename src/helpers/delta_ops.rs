@@ -1,34 +1,13 @@
-use url::Url;
-use std::sync::Arc;
 use std::collections::HashMap;
-use object_store::azure::MicrosoftAzureBuilder;
 
 use deltalake::DeltaTable;
 use deltalake::DeltaTableError;
 use deltalake::DeltaTableBuilder;
 use deltalake::protocol::SaveMode;
 use deltalake::operations::DeltaOps;
-use deltalake::storage::DeltaObjectStore;
-use deltalake::schema::Schema as DeltaSchema;
+use deltalake::kernel::Schema as DeltaSchema;
 use deltalake::arrow::record_batch::RecordBatch;
 use deltalake::operations::create::CreateBuilder;
-
-// CHECK: Unused
-#[allow(unused)]
-pub fn get_delta_store(container_name: &str, output_url: &str) -> Arc<DeltaObjectStore> {
-    let azure_store = MicrosoftAzureBuilder::from_env()
-        .with_container_name(container_name)
-        .with_url(output_url)
-        .build()
-        .unwrap();
-
-    let azure_store = Arc::new(azure_store);
-
-    let output_url = Url::parse(output_url)
-        .map_err(|e| format!("Failed to parse URL: {}", e))
-        .unwrap();
-    Arc::new(DeltaObjectStore::new(azure_store, output_url))
-}
 
 pub async fn create_and_write_table(
     record_batch: &RecordBatch,
@@ -39,7 +18,7 @@ pub async fn create_and_write_table(
     let new_table = CreateBuilder::new()
         .with_location(target_table_path)
         .with_storage_options(backend_config.clone())
-        .with_columns(delta_schema.get_fields().clone())
+        .with_columns(delta_schema.fields().clone())
         .await?;
 
     DeltaOps::from(new_table)
@@ -68,7 +47,7 @@ pub async fn try_get_delta_table(
             CreateBuilder::new()
                 .with_location(target_table_path)
                 .with_storage_options(backend_config.clone())
-                .with_columns(delta_schema.get_fields().clone())
+                .with_columns(delta_schema.fields().clone())
                 .await
         }
         Err(e) => {
