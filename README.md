@@ -2,6 +2,10 @@
 
 This example demonstrates how to create Delta Table pipeline with blob triggered throughes Event Grid Azure function using Rust.
 
+<p align="center">
+  <img src="./images/diagram.jpg" alt="Diagram" width="65%">
+</p>
+
 Whenever a CSV file is uploaded to a specific subfolder in container, the Azure Function is invoked to process the file. The content is then added to the Delta Table. If table does not exist, it is created. If there are any updates to a row determined by a specific column, the function will execute a merge, integrating the revised data into the existing Delta Table.
 
 This approach is efficient for small files and eliminates the necessity for Spark.
